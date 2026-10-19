@@ -48,6 +48,8 @@ button:disabled{opacity:.45;cursor:not-allowed;filter:none}
 .tool.locked{opacity:.55}
 .zoom{position:absolute;right:16px;bottom:16px;display:flex;flex-direction:column;gap:8px}
 .zoom button{width:40px;height:40px;padding:0;font-size:20px}
+.zoom #xray{font-size:16px}
+.zoom #xray.on{background:var(--gold);color:#2a1d05}
 #quest{position:absolute;left:16px;top:16px;max-width:min(330px,calc(100% - 32px));display:flex;flex-direction:column;gap:8px;z-index:2}
 .qc{background:rgba(11,12,22,.88);padding:8px 12px;box-shadow:0 0 0 2px var(--panel2);display:flex;flex-direction:column;gap:2px;line-height:1.4}
 .qc .k{color:var(--dim);font-size:12px;letter-spacing:.05em}
@@ -117,7 +119,7 @@ button:disabled{opacity:.45;cursor:not-allowed;filter:none}
   <main id="view">
     <canvas id="map" aria-label="城市地圖"></canvas>
     <div id="quest" aria-live="polite"></div>
-    <div class="zoom"><button id="zin" type="button" aria-label="放大">+</button><button id="zout" type="button" aria-label="縮小">−</button></div>
+    <div class="zoom"><button id="xray" type="button" aria-label="透視模式" aria-pressed="false" title="透視模式：讓高樓變透明，看得到後面的房子">透</button><button id="zin" type="button" aria-label="放大">+</button><button id="zout" type="button" aria-label="縮小">−</button></div>
     <div id="info" class="panel" hidden></div>
     <div id="banner" hidden></div>
     <div id="toast" role="status"></div>
@@ -132,6 +134,7 @@ button:disabled{opacity:.45;cursor:not-allowed;filter:none}
     <button class="tool" data-tool="factory" type="button">工廠<small>150 金</small></button>
     <button class="tool" data-tool="big" type="button">大型<small>2×2</small></button>
     <button class="tool" data-tool="landmark" type="button">地標<small>獨一無二</small></button>
+    <button class="tool" data-tool="jp" type="button">和風<small>神社・鳥居</small></button>
     <button class="tool" data-tool="land" type="button">買地<small>擴張</small></button>
     <button class="tool" data-tool="bulldoze" type="button">拆除<small>免費</small></button>
   </nav>
@@ -172,7 +175,8 @@ const SEASONS = [
 const COST = { road:5, park:30, shop:60, school:120, factory:150 };
 const BRIDGE = 25;
 const UNLOCK = { school:20, factory:40 };
-const NAMES = { road:'道路', park:'公園', shop:'商店', school:'學校', factory:'工廠', hospital:'醫院', mall:'購物中心', stadium:'體育場' };
+const NAMES = { road:'道路', park:'公園', shop:'商店', school:'學校', factory:'工廠', hospital:'醫院', mall:'購物中心', stadium:'體育場',
+  torii:'鳥居', jgarden:'日式庭園', onsen:'溫泉', pagoda:'五重塔', shrine:'神社' };
 const LANDMARKS = [
   { name:'鐘塔',     cost:500,  unlock:100, tour:4,  desc:'全城幸福 +5，每小時觀光收入 +4' },
   { name:'摩天輪',   cost:1200, unlock:200, tour:10, desc:'全城幸福 +5，每小時觀光收入 +10' },
@@ -183,6 +187,28 @@ const BIGS = [
   { k:'mall',     name:'購物中心', cost:1000, lv:1, desc:'6 格內都算「附近有商店」，顧客越多越賺' },
   { k:'stadium',  name:'體育場',   cost:1500, lv:2, desc:'全城幸福 +5、每小時觀光收入 +8，煙火節加倍' },
 ];
+const STYLES = [
+  [ { id:'',   n:'木屋',         cost:20,  max:5,  pop:2, hap:0,  d:'最基本的小木屋' },
+    { id:'jp', n:'日式矮房',     cost:30,  max:2,  pop:2, hap:10, d:'最多 2 層，院子裡有松樹，幸福 +10', pal:{ wall:'#ece1c6', wallD:'#4a3426', roof:'#3d4250', roofL:'#5d6474', win:'#d8c99a' } },
+    { id:'uk', n:'英式小屋',     cost:35,  max:4,  pop:2, hap:5,  d:'紅磚、煙囪、白窗框，幸福 +5', pal:{ wall:'#a8503c', wallD:'#7c3a2c', roof:'#3a3f4a', roofL:'#596070', win:'#cfe3f2' } },
+    { id:'tw', n:'台式透天厝',   cost:30,  max:5,  pop:3, hap:0,  d:'鐵窗加頂樓水塔，每層住 3 人', pal:{ wall:'#dcd6c8', wallD:'#a39d8e', roof:'#8a8578', roofL:'#a9a395', win:'#4f6a70' } } ],
+  [ { id:'',   n:'現代公寓',     cost:80,  max:15, pop:4, hap:0,  d:'標準公寓' },
+    { id:'uk', n:'英式紅磚公寓', cost:100, max:12, pop:4, hap:5,  d:'白色窗框與煙囪，幸福 +5', pal:{ wall:'#9c4a36', wallD:'#6f3326', roof:'#3a3f4a', roofL:'#596070', win:'#d4e4f0' } },
+    { id:'tw', n:'台式公寓',     cost:90,  max:12, pop:5, hap:-3, d:'陽台、冷氣、鐵窗，每層住 5 人，但有點擠（幸福 −3）', pal:{ wall:'#cbc5b4', wallD:'#958e7c', roof:'#6d6a62', roofL:'#8a867c', win:'#4f6a70' } } ],
+  [ { id:'',   n:'玻璃大樓',     cost:300, max:40, pop:6, hap:0,  d:'城市的天際線' } ],
+];
+function bspec(t){ const s = STYLES[t.t].find(q => q.id === (t.st || '')) || STYLES[t.t][0]; return { ...TIERS[t.t], ...s, ...(s.pal || {}), name:s.n, st:s.id }; }
+const RULES = ['', '周圍 8 格內要有至少 1 棟小房子', '周圍 8 格內要有至少 2 棟公寓'];
+function bldNeighbors(x,y,tier){ let n = 0; for (let dy=-1; dy<=1; dy++) for (let dx=-1; dx<=1; dx++){ if (!dx && !dy) continue; const t = get(x+dx,y+dy); if (t?.k === 'bld' && t.t === tier) n++; } return n; }
+const ruleOk = (ti,x,y) => ti === 0 || (ti === 1 ? bldNeighbors(x,y,0) >= 1 : bldNeighbors(x,y,1) >= 2);
+const JP = [
+  { k:'torii',   n:'鳥居',     cost:40,  pop:0,   d:'3 格內的住戶幸福 +5' },
+  { k:'jgarden', n:'日式庭園', cost:60,  pop:0,   d:'算是公園：3 格內幸福 +15，有池塘、石燈籠和楓樹' },
+  { k:'onsen',   n:'溫泉',     cost:200, pop:60,  d:'3 格內幸福 +10，每小時觀光 +3（冬天加倍）' },
+  { k:'pagoda',  n:'五重塔',   cost:900, pop:150, d:'全城只能蓋一座。全城幸福 +5，每小時觀光 +8', unique:true },
+  { k:'shrine',  n:'神社',     cost:600, pop:100, d:'佔 2×2。5 格內幸福 +15、每小時觀光 +5，夏天會辦祭典', big:true },
+];
+const GRAND_COST = 800;
 const ROOFS = { garden:{ n:'屋頂花園', d:'這棟幸福 +5' }, heli:{ n:'停機坪', d:'每小時 +2 金' }, neon:{ n:'霓虹招牌', d:'每小時 +1 金，晚上會發光' } };
 const LEVELS = [ { n:'村莊', pop:0 }, { n:'小鎮', pop:100, u:'解鎖買地、醫院、購物中心' }, { n:'城市', pop:400, u:'解鎖體育場' }, { n:'大都會', pop:1000, u:'金色樓層出現機率加倍' } ];
 const POLICIES = { green:{ n:'綠色城市', d:'公園的幸福加成從 +15 變 +25' }, econ:{ n:'經濟優先', d:'商店、購物中心、工廠收入 +25%' }, tour:{ n:'觀光立市', d:'地標、體育場觀光收入 +50%' } };
@@ -266,21 +292,24 @@ function near(x,y,r,k){ for (let dy=-r; dy<=r; dy++) for (let dx=-r; dx<=r; dx++
 function nearTerr(x,y,r,v){ for (let dy=-r; dy<=r; dy++) for (let dx=-r; dx<=r; dx++){ if (Math.abs(dx)+Math.abs(dy) > r) continue; if (inb(x+dx,y+dy) && S.terr[idx(x+dx,y+dy)] === v) return true; } return false; }
 function popNear(x,y,r){ let c = 0; for (const k in ST.res){ const e = ST.res[k]; if (!e.res) continue; const bx = k%W, by = (k/W)|0; if (Math.abs(bx-x)+Math.abs(by-y) <= r) c += e.res; } return c; }
 const policy = () => S.policy && S.min < S.policy.until ? S.policy.k : null;
-const festival = () => S.evt?.k === 'fireworks' && S.evt.done;
+const festival = () => (S.evt?.k === 'fireworks' || S.evt?.k === 'matsuri') && S.evt.done;
+const matsuri = () => S.evt?.k === 'matsuri' && S.evt.done;
 const blackout = () => S.evt?.k === 'blackout' && S.evt.done && !S.evt.end;
 const heavyCount = t => ((t.s || '').match(/h/g) || []).length;
 function evalB(x,y,t){
   const road = roadAdj(x,y), park = near(x,y,3,'park'), shop = near(x,y,4,'shop') || near(x,y,6,'mall');
   const school = near(x,y,5,'school'), hosp = near(x,y,7,'hospital'), smog = near(x,y,2,'factory');
   const water = nearTerr(x,y,2,1), hill = S.terr[idx(x,y)] === 2;
-  const lm = Math.min(15, C('lm')*5), stad = Math.min(10, C('stadium')*5), fest = festival() ? 10 : 0;
+  const torii = near(x,y,3,'torii'), onsen = near(x,y,3,'onsen'), shrine = near(x,y,5,'shrine'), sp = bspec(t);
+  const lm = Math.min(20, (C('lm') + C('pagoda'))*5) + (ST.grand ? 3 : 0), stad = Math.min(10, C('stadium')*5), fest = festival() ? 10 : 0;
   const parkB = park ? (policy() === 'green' ? 25 : 15) : 0, garden = t.roof === 'garden' ? 5 : 0, traffic = Math.round(ST.cong*15);
-  const h = clamp(30 + parkB + (shop?15:0) + (school?10:0) + (hosp?15:0) + (water?10:0) + (hill?10:0) + garden + Math.round((t.p||0)*10) + lm + stad + fest - (smog?20:0) - traffic, 0, 100);
-  return { road, park, shop, school, hosp, smog, water, hill, lm, stad, fest, garden, traffic, h, res: road ? (t.f + heavyCount(t))*TIERS[t.t].pop : 0 };
+  const h = clamp(30 + parkB + (shop?15:0) + (school?10:0) + (hosp?15:0) + (water?10:0) + (hill?10:0) + (torii?5:0) + (onsen?10:0) + (shrine?15:0) + sp.hap + garden
+    + Math.round((t.p||0)*10) + lm + stad + fest - (smog?20:0) - traffic, 0, 100);
+  return { road, park, shop, school, hosp, smog, water, hill, torii, onsen, shrine, style:sp.hap, lm, stad, fest, garden, traffic, h, res: road ? (t.f + heavyCount(t))*sp.pop : 0 };
 }
 function compute(){
   const cnt = {}, maxF = [0,0,0], lmBuilt = [];
-  let roofs = 0, bridges = 0, junc = 0, roads = 0;
+  let roofs = 0, bridges = 0, junc = 0, roads = 0, grand = 0;
   S.grid.forEach((t,i) => {
     if (!t) return;
     const x = i%W, y = (i/W)|0;
@@ -290,15 +319,15 @@ function compute(){
     if (t.k === 'bld'){ maxF[t.t] = Math.max(maxF[t.t], t.f); if (t.roof) roofs++; }
     else if (t.k === 'lm') lmBuilt[t.id] = true;
     else if (t.k === 'road'){
-      roads++; if (S.terr[i] === 1) bridges++;
+      roads++; if (S.terr[i] === 1) bridges++; if (t.grand) grand++;
       let n = 0; for (const [a,b] of N4) if (get(x+a,y+b)?.k === 'road') n++;
       if (n >= 3) junc++;
     }
   });
-  ST.cnt = cnt; ST.maxF = maxF; ST.lmBuilt = lmBuilt; ST.roofs = roofs; ST.bridges = bridges;
+  ST.cnt = cnt; ST.maxF = maxF; ST.lmBuilt = lmBuilt; ST.roofs = roofs; ST.bridges = bridges; ST.grand = grand;
   const res = {}; let pop = 0;
-  for (let i=0; i<S.grid.length; i++){ const t = S.grid[i]; if (t?.k !== 'bld') continue; const r0 = roadAdj(i%W,(i/W)|0) ? (t.f + heavyCount(t))*TIERS[t.t].pop : 0; pop += r0; }
-  const cap = roads*6 + junc*12;
+  for (let i=0; i<S.grid.length; i++){ const t = S.grid[i]; if (t?.k !== 'bld') continue; const r0 = roadAdj(i%W,(i/W)|0) ? (t.f + heavyCount(t))*bspec(t).pop : 0; pop += r0; }
+  const cap = roads*6 + junc*12 + grand*20;
   ST.cong = pop && cap ? clamp(pop/cap - 1, 0, 1) : 0;
   let hs = 0, resInc = 0, extra = 0;
   for (let i=0; i<S.grid.length; i++){
@@ -317,13 +346,17 @@ function compute(){
     if (t.k === 'shop'){ const road = roadAdj(x,y), c = road ? popNear(x,y,4) : 0, v = Math.min(c,60)*0.08*econ*market; res[i] = { customers:c, inc:v, road }; biz += v; }
     else if (t.k === 'factory'){ const road = roadAdj(x,y), c = road ? popNear(x,y,6) : 0, v = Math.min(c,80)*0.15*econ; res[i] = { workers:c, inc:v, road }; biz += v; }
     else if (t.k === 'lm'){ const v = LANDMARKS[t.id].tour*(0.5 + happy/100)*tourM; res[i] = { inc:v }; tour += v; }
+    else if (t.k === 'pagoda'){ const v = 8*(0.5 + happy/100)*tourM; res[i] = { inc:v }; tour += v; }
+    else if (t.k === 'onsen'){ const v = 3*(season() === 3 ? 2 : 1)*tourM; res[i] = { inc:v }; tour += v; }
     else if (t.k === 'big' && x === t.ax && y === t.ay){
       const road = bigRoad(x,y);
+      if (t.bk === 'shrine'){ const v = 5*tourM*(matsuri() ? 2 : 1); res[i] = { inc:v, road }; tour += v; return; }
       if (t.bk === 'mall'){ const c = road ? popNear(x,y,6) : 0, v = Math.min(c,150)*0.1*econ*market; res[i] = { customers:c, inc:v, road }; biz += v; }
       else if (t.bk === 'stadium'){ const v = road ? 8*(0.5 + happy/100)*tourM*(festival() ? 2 : 1) : 0; res[i] = { inc:v, road }; tour += v; }
       else res[i] = { road };
     }
   });
+  tour += grand*1.5*tourM;
   if (S.evt?.k === 'typhoon') resInc *= .5;
   if (blackout()) resInc *= .8;
   ST.pop = pop; ST.happy = happy; ST.inc = resInc + biz + tour + extra;
@@ -365,6 +398,8 @@ function newDay(){
   let evt = null;
   if (w === 4) evt = { k:'typhoon', h:12 };
   else if (d % 10 === 0) evt = { k:'election', h:9 };
+  else if (C('shrine') && (d - 1) % 28 === 0) evt = { k:'hatsumode', h:9 };
+  else if (C('shrine') && sea === 1 && r2 < .3) evt = { k:'matsuri', h:18 };
   else if (d >= 5 && r2 < .07) evt = { k:'quake', h:hr(7) };
   else if (d >= 8 && r2 < .1) evt = { k:'ufo', h:21 };
   else if (ST.pop >= 20 && r2 < .16) evt = { k:'blackout', h:19 };
@@ -419,8 +454,17 @@ function fireEvent(){
   } else if (e.k === 'fireworks'){
     S.st.fireworks = 1;
     const msg = `煙火節開始了！今天全城幸福 +10${C('stadium') ? '，體育場收入加倍' : ''}。`; toast(msg); addLog(msg); compute();
+  } else if (e.k === 'matsuri'){
+    S.st.matsuri = 1;
+    const msg = '夏祭り開始了！街上掛滿燈籠，今天全城幸福 +10，神社觀光收入加倍。'; toast(msg); addLog(msg); compute();
+    beep(587,.12,'triangle'); setTimeout(() => beep(784,.2,'triangle'), 140);
+  } else if (e.k === 'hatsumode'){
+    const gain = Math.floor((80 + ST.pop*.5)*(policy() === 'tour' ? 1.5 : 1));
+    S.coins += gain; S.st.hatsumode = 1;
+    const msg = `新年初詣！大家到神社參拜，香油錢與觀光收入共 ${gain} 金。`; toast(msg); addLog(msg); markDirty();
+    beep(880,.3,'sine',.05);
   } else if (e.k === 'ufo'){
-    const blds = []; S.grid.forEach((t,i) => { if (t?.k === 'bld' && t.f < TIERS[t.t].max) blds.push(i); });
+    const blds = []; S.grid.forEach((t,i) => { if (t?.k === 'bld' && t.f < bspec(t).max) blds.push(i); });
     const i = blds.length ? blds[Math.floor(Math.random()*blds.length)] : -1;
     ufo = { t:0, i, applied:false };
     toast('天空出現奇怪的光……');
@@ -445,9 +489,9 @@ function updUfo(dt){
     ufo.applied = true; S.st.ufo = 1;
     const t = ufo.i >= 0 ? S.grid[ufo.i] : null;
     if (t?.k === 'bld'){
-      const n = Math.min(3, TIERS[t.t].max - t.f), top = t.f - 1;
+      const n = Math.min(3, bspec(t).max - t.f), top = t.f - 1;
       for (let k=0; k<n; k++){ t.w.push(t.w[top]); t.o.push(t.o[top]); t.s = (t.s || '') + 'n'; t.f++; }
-      const msg = `外星人來訪！幫一棟${TIERS[t.t].name}加蓋了 ${n} 層，然後飛走了。`; toast(msg); addLog(msg);
+      const msg = `外星人來訪！幫一棟${bspec(t).name}加蓋了 ${n} 層，然後飛走了。`; toast(msg); addLog(msg);
     } else { S.coins += 300; const msg = '外星人來訪！留下一塊奇怪的金屬，賣了 300 金。'; toast(msg); addLog(msg); }
     beep(1400,.3,'sine',.05); changed();
   }
@@ -495,7 +539,7 @@ function reqTick(){
   S.req = { x:c.x, y:c.y, need:c.nd.k, until:S.min + 2*1440, reward:50 + c.t.f*10 };
   toast(`有居民提出請求了！看看左上角。`); markDirty();
 }
-function reqText(){ const R = S.req, t = get(R.x,R.y), nd = NEEDS.find(n => n.k === R.need); return `一棟 ${t.f} 層${TIERS[t.t].name}的居民想要 ${nd.r} 格內有${nd.n}`; }
+function reqText(){ const R = S.req, t = get(R.x,R.y), nd = NEEDS.find(n => n.k === R.need); return `一棟 ${t.f} 層${bspec(t).name}的居民想要 ${nd.r} 格內有${nd.n}`; }
 
 /* ---------- quests & achievements ---------- */
 const popQ = n => ({ t:`人口達到 ${n}`, ok:() => ST.pop >= n, p:() => `${ST.pop}/${n}` });
@@ -507,6 +551,8 @@ const QUESTS = [
   { t:'在河上蓋一座橋（道路可以蓋在水上）', ok:() => ST.bridges >= 1 && S.st.builtBridge, r:40 },
   { t:'疊出一棟 5 層木屋', ok:() => ST.maxF[0] >= 5, p:() => `${ST.maxF[0]}/5`, r:60 },
   { t:'蓋一所學校', ok:() => C('school') >= 1, r:80 },
+  { t:'蓋一棟日式、英式或台式的小房子', ok:() => S.grid.some(t => t?.k === 'bld' && t.st), r:60 },
+  { t:'用「和風」蓋一座鳥居', ok:() => C('torii') >= 1, r:50 },
   { ...popQ(50), t:'人口達到 50，解鎖公寓', r:100 },
   { t:'一次疊樓連續 5 次完美', ok:() => (S.st.maxCombo||0) >= 5, p:() => `${S.st.maxCombo||0}/5`, r:100 },
   { t:'完成一次居民請求', ok:() => (S.st.req||0) >= 1, r:80 },
@@ -516,12 +562,15 @@ const QUESTS = [
   { t:'買下第一塊新土地', ok:() => S.bought >= 1, r:150 },
   { t:'疊出一棟 15 層公寓', ok:() => ST.maxF[1] >= 15, p:() => `${ST.maxF[1]}/15`, r:200 },
   { t:'蓋一座醫院或購物中心', ok:() => C('hospital') + C('mall') >= 1, r:250 },
+  { t:'蓋一座神社', ok:() => C('shrine') >= 1, r:250 },
   { t:'完成一次每日挑戰', ok:() => (S.st.dailyPlays||0) >= 1, r:150 },
   { t:'蓋第一座地標', ok:() => C('lm') >= 1, r:300 },
   { ...popQ(250), t:'人口達到 250，解鎖大樓', r:300 },
   { ...popQ(400), t:'人口達到 400，升級成城市', r:400 },
   { t:'疊出 20 層以上的大樓', ok:() => ST.maxF[2] >= 20, p:() => `${ST.maxF[2]}/20`, r:500 },
   { t:'蓋一座體育場', ok:() => C('stadium') >= 1, r:500 },
+  { t:'在河上蓋一座跨河大橋', ok:() => ST.grand >= 1, r:500 },
+  { t:'蓋一座五重塔', ok:() => C('pagoda') >= 1, r:600 },
   { t:'蓋齊三座地標', ok:() => C('lm') >= 3, p:() => `${C('lm')}/3`, r:1500 },
   { ...popQ(1000), t:'人口達到 1000，升級成大都會', r:2000 },
 ];
@@ -552,6 +601,11 @@ const ACH = [
   { id:'day30',   n:'老市長',     d:'經營到第 30 天',                     ok:() => dayNo() >= 30 },
   { id:'daily30', n:'挑戰者',     d:'每日挑戰拿到 30 分以上',             ok:() => (S.st.dailyBest||0) >= 30 },
   { id:'metro',   n:'大都會',     d:'城市等級達到大都會',                 ok:() => (S.level||0) >= 3 },
+  { id:'world',   n:'異國風情',   d:'同時擁有日式、英式、台式三種房子',   ok:() => ['jp','uk','tw'].every(s => S.grid.some(t => t?.k === 'bld' && t.st === s)) },
+  { id:'wa',      n:'和風之町',   d:'同時擁有鳥居、日式庭園、溫泉、五重塔和神社', ok:() => ['torii','jgarden','onsen','pagoda','shrine'].every(k => C(k) >= 1) },
+  { id:'matsuri', n:'夏祭り',     d:'經歷一次神社祭典',                   ok:() => !!S.st.matsuri },
+  { id:'hatsu',   n:'初詣',       d:'在神社迎接新年',                     ok:() => !!S.st.hatsumode },
+  { id:'golden',  n:'金門',       d:'蓋一座跨河大橋',                     ok:() => ST.grand >= 1 },
 ];
 function checkGoals(){
   const q = QUESTS[S.quest];
@@ -745,7 +799,7 @@ function drawRoad(x,y){
   const px = x*T, py = M + y*T, sea = SEASONS[season()], bridge = S.terr[idx(x,y)] === 1;
   const c = (a,b) => { const nx = x+a, ny = y+b; if (nx < 0 || nx >= W) return true; return get(nx,ny)?.k === 'road'; };
   const L = c(-1,0), R = c(1,0), U = c(0,-1), D = c(0,1);
-  g.fillStyle = bridge ? '#7a5a3a' : sea.snow ? '#e8eef2' : '#9a958a'; g.fillRect(px,py,T,T);
+  g.fillStyle = bridge ? (get(x,y)?.grand ? '#b8452f' : '#7a5a3a') : sea.snow ? '#e8eef2' : '#9a958a'; g.fillRect(px,py,T,T);
   if (bridge){ g.fillStyle = sea.water; if (!U) g.fillRect(px,py,T,1); if (!D) g.fillRect(px,py+T-1,T,1); if (!L) g.fillRect(px,py,1,T); if (!R) g.fillRect(px+T-1,py,1,T); }
   g.fillStyle = '#4b4b57'; g.fillRect(px+2,py+2,12,12);
   if (L) g.fillRect(px,py+2,2,12); if (R) g.fillRect(px+14,py+2,2,12);
@@ -904,6 +958,131 @@ function drawBig(ax,ay,k){
     }
   }
 }
+function drawTorii(x,y){
+  const px = x*T, py = M + y*T, red = '#d2402c', dk = '#8a2a1e';
+  g.fillStyle = '#9a958a'; g.fillRect(px+4, py+13, 8, 2);
+  g.fillStyle = red; g.fillRect(px+4, py-4, 2, 17); g.fillRect(px+10, py-4, 2, 17);
+  g.fillStyle = dk; g.fillRect(px+5, py-4, 1, 17); g.fillRect(px+11, py-4, 1, 17);
+  g.fillStyle = red; g.fillRect(px+3, py-2, 10, 1);
+  g.fillStyle = '#2b2b30'; g.fillRect(px+1, py-7, 14, 2); g.fillRect(px, py-8, 2, 1); g.fillRect(px+14, py-8, 2, 1);
+  g.fillStyle = red; g.fillRect(px+2, py-5, 12, 1);
+  g.fillStyle = '#f4f1ea'; g.fillRect(px+7, py-4, 2, 2);
+  if (SEASONS[season()].snow){ g.fillStyle = '#f4f8fa'; g.fillRect(px+1, py-8, 14, 1); }
+}
+function drawJGardenGround(x,y){
+  const px = x*T, py = M + y*T, sea = SEASONS[season()];
+  g.fillStyle = sea.snow ? '#f2f6f8' : '#6aa95a'; g.fillRect(px,py,T,T);
+  g.fillStyle = sea.snow ? '#dfe7ec' : '#d9d2bf'; for (let i=0; i<6; i++) g.fillRect(px+1 + i*2, py+13 - (i%2), 2, 1);
+  g.fillStyle = sea.snow ? sea.water : '#3f7fb5'; g.fillRect(px+2, py+3, 7, 5); g.fillStyle = sea.waterL; g.fillRect(px+3, py+4, 3, 1);
+  if (!sea.snow){ g.fillStyle = '#f08a3a'; g.fillRect(px+5, py+6, 1, 1); g.fillStyle = '#ffffff'; g.fillRect(px+7, py+5, 1, 1); }
+  g.fillStyle = '#8a8478'; g.fillRect(px+9, py+9, 2, 2); g.fillRect(px+3, py+10, 3, 2);
+}
+function drawJGarden(x,y){
+  const px = x*T, py = M + y*T, sea = season();
+  const leaf = sea === 0 ? '#f4a7c0' : sea === 2 ? '#d8452a' : sea === 3 ? '#eef4f7' : '#4f9a45';
+  g.fillStyle = '#6b4a2e'; g.fillRect(px+12, py+3, 1, 6);
+  g.fillStyle = leaf; g.fillRect(px+9, py-1, 7, 4); g.fillRect(px+10, py-3, 5, 2);
+  g.fillStyle = '#a9a396'; g.fillRect(px+5, py+5, 3, 1); g.fillRect(px+6, py+6, 1, 3); g.fillRect(px+5, py+3, 3, 2); g.fillRect(px+4, py+2, 5, 1);
+  g.fillStyle = '#ffd47a'; g.fillRect(px+6, py+3, 1, 1); lights.push([px+6, py+3, 1, 1, 1]);
+}
+function drawOnsen(x,y){
+  const px = x*T, py = M + y*T, snow = SEASONS[season()].snow;
+  g.fillStyle = '#8a8478'; g.fillRect(px+1, py+9, 14, 6);
+  g.fillStyle = '#7fc6c2'; g.fillRect(px+2, py+10, 12, 4); g.fillStyle = '#b8ece6'; g.fillRect(px+4, py+11, 4, 1);
+  g.fillStyle = '#6b4a2e'; g.fillRect(px+1, py+1, 8, 7); g.fillStyle = '#ece1c6'; g.fillRect(px+2, py+3, 6, 5);
+  g.fillStyle = '#3d4250'; g.fillRect(px, py-1, 10, 2); g.fillStyle = snow ? '#f4f8fa' : '#5d6474'; g.fillRect(px+1, py-2, 8, 1);
+  g.fillStyle = '#2f5d9a'; g.fillRect(px+3, py+3, 4, 3); g.fillStyle = '#ffffff'; g.fillRect(px+4, py+4, 2, 1);
+  lights.push([px+2, py+3, 1, 4, .8]);
+  for (let i=0; i<3; i++){ const ph = (now*.4 + i/3) % 1; g.fillStyle = `rgba(255,255,255,${.55*(1-ph)})`; g.fillRect(Math.round(px + 5 + i*3 + Math.sin(now*2 + i)*1.5), Math.round(py + 9 - ph*12), 2, 2); }
+}
+function drawPagoda(x,y){
+  const px = x*T, py = M + y*T, cx = px + 8, snow = SEASONS[season()].snow;
+  g.fillStyle = '#9a958a'; g.fillRect(px+1, py+12, 14, 3);
+  let yy = py + 12;
+  for (let k=0; k<5; k++){
+    const bw = 10 - k, rw = 16 - k*2, bh = 5;
+    g.fillStyle = '#c8442f'; g.fillRect(cx - (bw>>1), yy - bh, bw, bh);
+    g.fillStyle = '#8a2a1e'; g.fillRect(cx + (bw>>1) - 1, yy - bh, 1, bh);
+    g.fillStyle = '#ffd47a'; g.fillRect(cx - 1, yy - bh + 1, 2, 2); lights.push([cx - 1, yy - bh + 1, 2, 2, .9]);
+    yy -= bh;
+    g.fillStyle = '#2f343e'; g.fillRect(cx - (rw>>1), yy - 1, rw, 2); g.fillRect(cx - (rw>>1) - 1, yy - 2, 1, 1); g.fillRect(cx + (rw>>1), yy - 2, 1, 1);
+    if (snow){ g.fillStyle = '#f4f8fa'; g.fillRect(cx - (rw>>1), yy - 1, rw, 1); }
+    yy -= 2;
+  }
+  g.fillStyle = '#c9a23a'; g.fillRect(cx, yy - 8, 1, 8); for (let k=0; k<4; k++) g.fillRect(cx - 1, yy - 2 - k*2, 3, 1);
+}
+function drawShrine(ax,ay){
+  const px = ax*T, top = M + ay*T, bot = M + (ay+2)*T - 1, snow = SEASONS[season()].snow, red = '#d2402c';
+  g.fillStyle = snow ? '#e6ecef' : '#d9d2bf'; g.fillRect(px, top, 32, 32);
+  g.fillStyle = snow ? '#f4f8fa' : '#cfc7b0'; g.fillRect(px+14, top+16, 4, 16);
+  for (const tx of [px+2, px+27]){ g.fillStyle = '#8a8478'; g.fillRect(tx, bot-8, 3, 1); g.fillRect(tx+1, bot-7, 1, 6); g.fillRect(tx, bot-10, 3, 2); g.fillStyle = '#ffd47a'; g.fillRect(tx+1, bot-10, 1, 1); lights.push([tx+1, bot-10, 1, 1, 1]); }
+  const by = top + 4;
+  g.fillStyle = '#ece1c6'; g.fillRect(px+6, by+4, 20, 12);
+  g.fillStyle = red; g.fillRect(px+6, by+4, 1, 12); g.fillRect(px+25, by+4, 1, 12); g.fillRect(px+12, by+4, 1, 12); g.fillRect(px+19, by+4, 1, 12); g.fillRect(px+6, by+4, 20, 1);
+  g.fillStyle = '#6b4a2e'; g.fillRect(px+13, by+9, 6, 7);
+  g.fillStyle = '#f4f1ea'; g.fillRect(px+15, by+6, 2, 3);
+  g.fillStyle = '#c9a23a'; g.fillRect(px+15, by+5, 2, 1);
+  g.fillStyle = '#2f343e'; g.fillRect(px+2, by+2, 28, 2); g.fillRect(px+4, by, 24, 2); g.fillRect(px+8, by-2, 16, 2); g.fillRect(px+1, by+1, 1, 1); g.fillRect(px+30, by+1, 1, 1);
+  g.fillStyle = snow ? '#f4f8fa' : '#4a505c'; g.fillRect(px+8, by-2, 16, 1);
+  g.fillStyle = '#c9a23a'; g.fillRect(px+10, by-4, 1, 2); g.fillRect(px+21, by-4, 1, 2);
+  lights.push([px+13, by+9, 6, 7, .5]);
+  g.fillStyle = red; g.fillRect(px+12, bot-12, 1, 12); g.fillRect(px+19, bot-12, 1, 12);
+  g.fillStyle = '#2b2b30'; g.fillRect(px+10, bot-14, 12, 2);
+  g.fillStyle = red; g.fillRect(px+11, bot-11, 10, 1);
+}
+function grandRuns(){
+  const runs = [], seen = new Set();
+  S.grid.forEach((t,i) => {
+    if (!t?.grand || seen.has(i)) return;
+    const x = i%W, y = (i/W)|0, d = t.grand;
+    let a = d === 'h' ? x : y, b = a;
+    const at = n => d === 'h' ? get(n,y) : get(x,n);
+    while (at(a-1)?.grand === d) a--;
+    while (at(b+1)?.grand === d) b++;
+    for (let n=a; n<=b; n++) seen.add(d === 'h' ? idx(n,y) : idx(x,n));
+    runs.push({ d, a, b, x, y });
+  });
+  return runs;
+}
+function drawGrandBridge(r){
+  const red = '#c8442f', H2 = 26;
+  const pt = n => r.d === 'h' ? [n*T + 8, M + r.y*T + 8] : [r.x*T + 8, M + n*T + 8];
+  const [x0,y0] = pt(r.a), [x1,y1] = pt(r.b);
+  const towers = r.d === 'h' ? [[r.a*T + 1, y0], [r.b*T + 13, y1]] : [[x0, M + r.a*T + 1], [x1, M + r.b*T + 14]];
+  for (const off of r.d === 'h' ? [-6, 5] : [-6, 5]){
+    const sx = r.d === 'h' ? towers[0][0] : towers[0][0] + off, sy = r.d === 'h' ? towers[0][1] + off : towers[0][1];
+    const ex = r.d === 'h' ? towers[1][0] : towers[1][0] + off, ey = r.d === 'h' ? towers[1][1] + off : towers[1][1];
+    const steps = Math.max(8, Math.round(Math.hypot(ex-sx, ey-sy)));
+    g.fillStyle = red;
+    for (let k=0; k<=steps; k++){
+      const t = k/steps, sag = 4*t*(1-t);
+      const cx = sx + (ex-sx)*t, cy = sy + (ey-sy)*t - H2 + sag*(H2 - 4);
+      g.fillRect(Math.round(cx), Math.round(cy), 1, 1);
+      if (k % 3 === 0 && k > 0 && k < steps){ const deck = sy + (ey-sy)*t; g.fillStyle = 'rgba(200,68,47,.55)'; g.fillRect(Math.round(cx), Math.round(cy)+1, 1, Math.max(0, Math.round(deck - cy) - 1)); g.fillStyle = red; }
+    }
+  }
+  for (const [tx,ty] of towers){
+    for (const off of [-6, 5]){
+      const bx = r.d === 'h' ? tx : tx + off, by = r.d === 'h' ? ty + off : ty;
+      g.fillStyle = red; g.fillRect(bx-1, by - H2 - 1, 2, H2 + 3);
+      g.fillStyle = '#8a2a1e'; g.fillRect(bx, by - H2 - 1, 1, H2 + 3);
+      g.fillStyle = '#ff5a4a'; if (Math.floor(now*2) % 2) g.fillRect(bx-1, by - H2 - 2, 1, 1);
+    }
+    if (r.d === 'h'){ g.fillStyle = red; g.fillRect(tx-1, ty - H2 + 2, 2, 11); g.fillRect(tx-1, ty - H2 + 10, 2, 1); }
+    else { g.fillStyle = red; g.fillRect(tx-6, ty - H2 + 2, 12, 1); g.fillRect(tx-6, ty - H2 + 9, 12, 1); }
+  }
+}
+function drawLanterns(){
+  if (!matsuri()) return;
+  const sw = Math.sin(now*3);
+  for (const i of roads()){
+    if ((i % 2) || hash(i, 3) < .3) continue;
+    const x = (i%W)*T, y = M + ((i/W)|0)*T;
+    const lx = x + 2 + Math.round(sw), ly = y + 1;
+    g.fillStyle = '#2b2b30'; g.fillRect(lx, ly-2, 1, 2);
+    glows.push([lx-1, ly, 3, 3, (i >> 1) % 3 ? 'rgba(255,90,60,.95)' : 'rgba(255,200,90,.95)']);
+  }
+}
 function drawBubble(px, py, need){
   const bob = Math.round(Math.sin(now*4));
   const y = py + bob;
@@ -920,28 +1099,64 @@ function floorColors(tier, k){
   return tier;
 }
 function drawBld(x,y,t,e){
-  const tier = TIERS[t.t], fh = tier.fh, px = x*T + 1, base = M + y*T + T - 1, snow = SEASONS[season()].snow;
+  const tier = bspec(t), st = tier.st, fh = tier.fh, px = x*T + 1, base = M + y*T + T - 1, snow = SEASONS[season()].snow;
   g.fillStyle = '#7a776f'; g.fillRect(px-1, base-1, 16, 2);
+  if (st === 'jp' && t.t === 0){
+    g.fillStyle = '#c9c2ae'; g.fillRect(px-1, base-1, 16, 2);
+    g.fillStyle = '#6b4a2e'; g.fillRect(px+12, base-5, 1, 4);
+    g.fillStyle = snow ? '#eef4f7' : '#2f6a3a'; g.fillRect(px+10, base-8, 5, 2); g.fillRect(px+11, base-10, 4, 2);
+  }
   let topL = px, topW = 14;
   for (let i=0; i<t.f; i++){
-    const w = Math.max(1, Math.round(t.w[i]*14)), l = px + Math.round(t.o[i]*14), yy = base - (i+1)*fh, fc = floorColors(tier, (t.s || '')[i]);
-    g.fillStyle = fc.wall; g.fillRect(l, yy, w, fh);
-    g.fillStyle = fc.wallD; g.fillRect(l+w-1, yy, 1, fh); g.fillRect(l, yy+fh-1, w, 1);
-    for (let wx = l+1; wx < l+w-1; wx += 3){
+    const w = Math.max(1, Math.round(t.w[i]*14)), l = px + Math.round(t.o[i]*14), yy = base - (i+1)*fh, kind = (t.s || '')[i], fc = floorColors(tier, kind);
+    const jw = st === 'jp' && t.t === 0 && !kind ? Math.max(1, Math.min(w, 10)) : w;
+    g.fillStyle = fc.wall; g.fillRect(l, yy, jw, fh);
+    g.fillStyle = fc.wallD; g.fillRect(l+jw-1, yy, 1, fh); g.fillRect(l, yy+fh-1, jw, 1);
+    if (st === 'jp' && t.t === 0 && !kind){ g.fillRect(l, yy, 1, fh); g.fillRect(l + (jw>>1), yy, 1, fh-1); }
+    for (let wx = l+1; wx < l+jw-1; wx += 3){
       g.fillStyle = fc.win; g.fillRect(wx, yy, 1, fh-1);
+      if (st === 'tw' && !kind){ g.fillStyle = '#3a3f44'; g.fillRect(wx, yy, 1, 1); }
+      if (st === 'uk' && !kind){ g.fillStyle = '#f4f1ea'; g.fillRect(wx, yy+fh-2, 1, 1); }
       if (hash(wx*7+i, y*31+x) < .55) lights.push([wx, yy, 1, fh-1, 1]);
     }
-    topL = l; topW = w;
+    if (st === 'tw' && t.t === 1 && !kind && i % 2 === 0){ g.fillStyle = '#d6d6d6'; g.fillRect(l+jw, yy, 1, 1); g.fillStyle = '#6d7076'; g.fillRect(l, yy+fh-1, jw, 1); }
+    topL = l; topW = jw;
   }
   const ry = base - t.f*fh;
   let roofTop = ry - 3;
-  if (t.t === 0){
+  if (t.t === 0 && st === 'jp'){
+    g.fillStyle = tier.roof; g.fillRect(topL-2, ry-1, topW+4, 1); g.fillRect(topL-1, ry-2, topW+2, 1); g.fillRect(topL, ry-3, topW, 1);
+    g.fillStyle = tier.roofL; g.fillRect(topL+1, ry-4, Math.max(1, topW-2), 1);
+    g.fillStyle = '#2b2f38'; g.fillRect(topL-2, ry-2, 1, 1); g.fillRect(topL+topW+1, ry-2, 1, 1);
+    if (snow){ g.fillStyle = '#f4f8fa'; g.fillRect(topL+1, ry-4, Math.max(1, topW-2), 1); }
+    roofTop = ry - 4;
+  } else if (t.t === 0 && st === 'tw'){
+    g.fillStyle = tier.roof; g.fillRect(topL, ry-2, topW, 2); g.fillStyle = snow ? '#f4f8fa' : tier.roofL; g.fillRect(topL, ry-2, topW, 1);
+    if (topW >= 6){ g.fillStyle = '#5a8a9a'; g.fillRect(topL, ry-5, Math.min(7, topW-3), 3); g.fillStyle = '#7fb0bf'; g.fillRect(topL, ry-5, Math.min(7, topW-3), 1); }
+    const tx = topL + topW - 4;
+    g.fillStyle = '#c9ccd2'; g.fillRect(tx, ry-6, 3, 4); g.fillStyle = '#4a7fb5'; g.fillRect(tx, ry-7, 3, 1); g.fillStyle = '#8a8e96'; g.fillRect(tx+2, ry-6, 1, 4);
+    roofTop = ry - 7;
+  } else if (t.t === 0){
     for (let k=0; k<4; k++){ const w = topW + 2 - k*4; if (w <= 0) break; g.fillStyle = k ? tier.roof : tier.roofL; g.fillRect(topL - 1 + k*2, ry - 1 - k, w, 1); roofTop = ry - 1 - k; }
     g.fillStyle = tier.roof; g.fillRect(topL-1, ry-1, topW+2, 1);
     if (snow){ g.fillStyle = '#f4f8fa'; g.fillRect(topL-1, ry-2, topW+2, 1); }
-  } else {
+    if (st === 'uk'){
+      const cx = topL + topW - 4;
+      g.fillStyle = '#7c3a2c'; g.fillRect(cx, ry-6, 2, 5); g.fillStyle = '#4a2a22'; g.fillRect(cx, ry-6, 2, 1);
+      if (season() >= 2 || dark() > .3){ const ph = (now*.5) % 1; g.fillStyle = `rgba(210,210,215,${.6*(1-ph)})`; g.fillRect(cx + Math.round(ph*3*S.windDir), Math.round(ry-8 - ph*8), 2, 2); }
+      roofTop = Math.min(roofTop, ry - 6);
+    }
+  } else if (t.roof || !(t.t === 1 && st)){
     g.fillStyle = tier.roof; g.fillRect(topL, ry-3, topW, 3);
     g.fillStyle = snow ? '#f4f8fa' : tier.roofL; g.fillRect(topL, ry-3, topW, 1);
+  }
+  if (t.t === 1 && st && !t.roof){
+    g.fillStyle = tier.roof; g.fillRect(topL, ry-3, topW, 3);
+    g.fillStyle = snow ? '#f4f8fa' : tier.roofL; g.fillRect(topL, ry-3, topW, 1);
+    if (st === 'uk'){ g.fillStyle = '#f4f1ea'; g.fillRect(topL, ry-1, topW, 1); g.fillStyle = '#7c3a2c'; for (let cx = topL+1; cx < topL+topW-1; cx += 4){ g.fillRect(cx, ry-5, 2, 2); } g.fillStyle = '#c4703a'; for (let cx = topL+1; cx < topL+topW-1; cx += 4) g.fillRect(cx, ry-6, 1, 1); roofTop = ry - 6; }
+    else { for (const tx of [topL+1, topL+topW-4]){ if (tx < topL) continue; g.fillStyle = '#c9ccd2'; g.fillRect(tx, ry-6, 3, 3); g.fillStyle = '#4a7fb5'; g.fillRect(tx, ry-7, 3, 1); } roofTop = ry - 7; }
+  }
+  if (t.t >= 1){
     const cx = topL + (topW>>1);
     if (t.roof === 'garden'){
       g.fillStyle = '#5fa84f'; g.fillRect(topL+1, ry-4, Math.max(1,topW-2), 1);
@@ -1077,6 +1292,19 @@ function drawUfo(){
   for (let i=0; i<4; i++) if ((Math.floor(now*6) + i) % 2) gp(x-6 + i*4, y+1, 1, 1, '#ffef7a');
 }
 
+let xray = false;
+function objHeight(t){
+  if (t.k === 'bld') return t.f*TIERS[t.t].fh + 8;
+  if (t.k === 'lm') return [34, 22, 72][t.id];
+  if (t.k === 'pagoda') return 44;
+  return 0;
+}
+function occludes(x, y, hpx){
+  if (xray) return true;
+  const rows = Math.ceil((hpx - 4)/T);
+  for (const p of [hover, sel]){ if (p && p.x === x && p.y < y && p.y >= y - rows) return true; }
+  return false;
+}
 function renderWorld(dt){
   if (groundKey !== season() + ':' + S.v + ':' + S.terr.length) paintGround();
   g.drawImage(groundCv, 0, 0); lights = []; glows = [];
@@ -1086,6 +1314,7 @@ function renderWorld(dt){
     const t = S.grid[idx(x,y)]; if (!t) continue;
     if (t.k === 'road') drawRoad(x,y);
     else if (t.k === 'park') drawParkGround(x,y);
+    else if (t.k === 'jgarden') drawJGardenGround(x,y);
     else if (t.k === 'school') drawYard(x,y, sea.snow ? '#e6ecef' : '#c9bf9d');
     else if (t.k === 'factory') drawYard(x,y,'#8c8678');
     else if (t.k === 'big') drawYard(x,y, sea.snow ? '#e6ecef' : '#b9b2a2');
@@ -1112,10 +1341,20 @@ function renderWorld(dt){
     else if (t.k === 'shop') drawShop(x,y);
     else if (t.k === 'school') drawSchool(x,y);
     else if (t.k === 'factory') drawFactory(x,y);
-    else if (t.k === 'lm') drawLandmark(x,y,t.id);
-    else if (t.k === 'big' && x === t.ax+1 && y === t.ay+1) drawBig(t.ax, t.ay, t.bk);
-    else if (t.k === 'bld') drawBld(x, y, t, ST.res[idx(x,y)]);
+    else if (t.k === 'torii') drawTorii(x,y);
+    else if (t.k === 'jgarden') drawJGarden(x,y);
+    else if (t.k === 'onsen') drawOnsen(x,y);
+    else if (t.k === 'big' && x === t.ax+1 && y === t.ay+1){ if (t.bk === 'shrine') drawShrine(t.ax, t.ay); else drawBig(t.ax, t.ay, t.bk); }
+    else if (t.k === 'lm' || t.k === 'pagoda' || t.k === 'bld'){
+      const hpx = objHeight(t), fade = hpx > T && occludes(x, y, hpx);
+      const li = lights.length, gi = glows.length;
+      if (fade) g.globalAlpha = .28;
+      if (t.k === 'lm') drawLandmark(x,y,t.id); else if (t.k === 'pagoda') drawPagoda(x,y); else drawBld(x, y, t, ST.res[idx(x,y)]);
+      if (fade){ g.globalAlpha = 1; lights.length = li; glows.length = gi; }
+    }
   }
+  if (ST.grand) for (const r of grandRuns()) drawGrandBridge(r);
+  drawLanterns();
   for (let py=0; py<PR; py++) for (let px=0; px<PC; px++){
     if (S.own[pidx(px,py)]) continue;
     const X = px*PS*T, Y = M + py*PS*T;
@@ -1188,7 +1427,7 @@ function drawMap(){
 }
 
 /* ---------- tools & input ---------- */
-const TOOL_ORDER = ['look','build','road','park','shop','school','factory','big','landmark','land','bulldoze'];
+const TOOL_ORDER = ['look','build','road','park','shop','school','factory','big','landmark','jp','land','bulldoze'];
 let tool = 'look';
 function setTool(t){
   tool = t; document.querySelectorAll('.tool').forEach(b => b.classList.toggle('on', b.dataset.tool === t));
@@ -1197,7 +1436,8 @@ function setTool(t){
   if ((t === 'land' || t === 'big') && (S.level || 0) < 1) return toast(`${t === 'land' ? '買地' : '大型建築'}在城市升級為「小鎮」（人口 100）時解鎖`);
   const tips = { build:'點一塊旁邊有道路的空地，開始疊房子', road:'按住拖曳可以連續鋪路；蓋在河上會變成橋（25 金）', park:'公園讓附近 3 格的住戶更幸福',
     shop:'商店讓附近 4 格的住戶更幸福，也會賺錢', school:'學校讓附近 5 格的住戶幸福 +10', factory:'工廠很會賺錢，但 2 格內的住戶會因為污染不開心',
-    big:'點一格當作 2×2 建築的左上角', landmark:'點一塊空地，選一座地標', land:'點一塊亮起來的土地買下它', bulldoze:'點一下拆掉格子上的東西' };
+    big:'點一格當作 2×2 建築的左上角；點河上的橋可以升級成跨河大橋', landmark:'點一塊空地，選一座地標', jp:'點一塊空地，蓋鳥居、日式庭園、溫泉、五重塔或神社',
+    land:'點一塊亮起來的土地買下它', bulldoze:'點一下拆掉格子上的東西' };
   if (tips[t]) toast(tips[t]);
 }
 document.querySelectorAll('.tool').forEach(b => b.addEventListener('click', () => setTool(b.dataset.tool)));
@@ -1217,7 +1457,8 @@ function toolValid(x,y){
   if (COST[tool]) return buildable(x,y) && !t && S.coins >= COST[tool] && !(UNLOCK[tool] && ST.pop < UNLOCK[tool]);
   if (tool === 'build') return buildable(x,y) && (!t || t.k === 'bld');
   if (tool === 'landmark') return buildable(x,y) && (!t || t.k === 'lm');
-  if (tool === 'big') return canBig(x,y);
+  if (tool === 'big') return canBig(x,y) || (t?.k === 'road' && terr(x,y) === 1 && !t.grand);
+  if (tool === 'jp') return buildable(x,y) && !t;
   if (tool === 'land') return !owned(x,y) && parcelAdj((x/PS)|0, (y/PS)|0);
   if (tool === 'bulldoze') return !!t && owned(x,y);
   return true;
@@ -1266,6 +1507,8 @@ cv.addEventListener('pointercancel', endPointer);
 cv.addEventListener('pointerleave', () => { hover = null; });
 cv.addEventListener('wheel', e => { e.preventDefault(); const r = cv.getBoundingClientRect(); zoom(e.deltaY < 0 ? 1 : -1, (e.clientX-r.left)*dpr, (e.clientY-r.top)*dpr); }, { passive:false });
 $('#zin').onclick = () => zoom(1); $('#zout').onclick = () => zoom(-1);
+function toggleXray(){ xray = !xray; const b = $('#xray'); b.classList.toggle('on', xray); b.setAttribute('aria-pressed', String(xray)); toast(xray ? '透視模式：高樓變透明' : '透視模式關閉'); }
+$('#xray').onclick = toggleXray;
 
 function paintRoad(t){
   if (!inb(t.x,t.y)) return; const i = idx(t.x,t.y); if (i === lastPaint) return; lastPaint = i;
@@ -1302,7 +1545,8 @@ function tapTile(x,y){
   if (tool === 'bulldoze'){
     if (!t) return;
     if (!owned(x,y)) return toast('這塊地還不是你的');
-    if (t.k === 'bld' || t.k === 'lm' || t.k === 'big'){ sel = {x,y}; showDemolish(x,y); }
+    if (t.k === 'bld' || t.k === 'lm' || t.k === 'big' || t.k === 'pagoda'){ sel = {x,y}; showDemolish(x,y); }
+    else if (t.k === 'road' && t.grand){ sel = {x,y}; panel(`<h3>拆除跨河大橋？</h3><p>整座大橋會變回普通的橋，不會退錢。</p><div class="btnrow"><button type="button" data-act="ungrand">確定</button></div>`); }
     else { S.grid[idx(x,y)] = null; beep(160,.1); changed(); }
     return;
   }
@@ -1317,8 +1561,13 @@ function tapTile(x,y){
     if (!t) showLandmarkPicker(x,y); else if (t.k === 'lm') showInfo(x,y); else toast('這格已經有東西了，先用「拆除」清空');
   } else if (tool === 'big'){
     if ((S.level || 0) < 1) return toast('大型建築在城市升級為「小鎮」（人口 100）時解鎖');
+    if (t?.k === 'road' && terr(x,y) === 1){ sel = {x,y}; return showGrand(x,y); }
     if (!canBig(x,y)) return toast('需要 2×2 的空地（這格往右、往下各一格），不能有水');
     sel = {x,y}; showBigPicker(x,y);
+  } else if (tool === 'jp'){
+    if (terr(x,y) === 1) return toast('水上只能蓋道路（橋）');
+    if (t) return t.k === 'big' || ['torii','jgarden','onsen','pagoda'].includes(t.k) ? (sel = {x,y}, showInfo(x,y)) : toast('這格已經有東西了，先用「拆除」清空');
+    sel = {x,y}; showJpPicker(x,y);
   } else if (COST[tool]) place(x,y,tool);
 }
 
@@ -1344,6 +1593,12 @@ function showInfo(x,y){
   if (t.k === 'school') return panel(`<h3>學校</h3>${yes(roadAdj(x,y),'有接道路','沒接道路')}<p>5 格內的住戶幸福度 +10。</p>`);
   if (t.k === 'shop') return panel(`<h3>商店</h3>${yes(e?.road,'有接道路','沒接道路，無法營業')}${row('附近顧客', `${e?.customers||0} 人`)}${row('收入', `+${(e?.inc||0).toFixed(1)} 金/時`)}<p class="dimtxt">4 格內的住戶越多，商店賺越多（最多算 60 人）。</p>`);
   if (t.k === 'factory') return panel(`<h3>工廠</h3>${yes(e?.road,'有接道路','沒接道路，無法開工')}${row('附近工人', `${e?.workers||0} 人`)}${row('收入', `+${(e?.inc||0).toFixed(1)} 金/時`)}<p class="dimtxt">6 格內的住戶會來上班（最多算 80 人）。2 格內的住戶會因污染幸福度 −20。</p>`);
+  if (t.k === 'road' && t.grand) return panel(`<h3>跨河大橋</h3><p>紅色的懸索大橋，城市的新地標。</p>${row('觀光收入', `每格 +1.5 金/時`)}<p class="dimtxt">全城幸福 +3，大橋的每一格也讓道路容量增加，減少塞車。</p>`);
+  if (t.k === 'torii') return panel(`<h3>鳥居</h3><p>3 格內的住戶幸福 +5。</p><p class="dimtxt">和風系列：鳥居、日式庭園、溫泉、五重塔、神社。</p>`);
+  if (t.k === 'jgarden') return panel(`<h3>日式庭園</h3><p>算是公園：3 格內的住戶幸福 +${policy() === 'green' ? 25 : 15}。楓樹會隨季節變色。</p>`);
+  if (t.k === 'onsen') return panel(`<h3>溫泉</h3><p>3 格內的住戶幸福 +10。</p>${row('觀光收入', `+${(e?.inc||0).toFixed(1)} 金/時`)}<p class="dimtxt">冬天泡溫泉的人變兩倍。</p>`);
+  if (t.k === 'pagoda') return panel(`<h3>五重塔</h3><p>全城幸福 +5。</p>${row('觀光收入', `+${(e?.inc||0).toFixed(1)} 金/時`)}<p class="dimtxt">城市越幸福，遊客越多。</p>`);
+  if (t.k === 'big' && t.bk === 'shrine') return panel(`<h3>神社</h3>${yes(e?.road,'有接道路','沒接道路')}<p>5 格內的住戶幸福 +15。</p>${row('觀光收入', `+${(e?.inc||0).toFixed(1)} 金/時`)}<p class="dimtxt">夏天有機會舉辦夏祭り，每年春天第一天有初詣。</p>`);
   if (t.k === 'lm'){ const L = LANDMARKS[t.id]; return panel(`<h3>${L.name}</h3><p>${L.desc}。</p>${row('觀光收入', `+${(e?.inc||0).toFixed(1)} 金/時`)}<p class="dimtxt">城市越幸福，遊客越多。</p>`); }
   if (t.k === 'big'){
     const B = BIGS.find(b => b.k === t.bk);
@@ -1353,7 +1608,7 @@ function showInfo(x,y){
     if (t.bk === 'hospital') h += '<p class="dimtxt">附近的建築在地震時損傷減半。</p>';
     return panel(h);
   }
-  const tier = TIERS[t.t], b = e || evalB(x,y,t), addCost = Math.ceil(tier.cost/2), hv = heavyCount(t), gd = ((t.s||'').match(/g/g) || []).length;
+  const tier = bspec(t), b = e || evalB(x,y,t), addCost = Math.ceil(tier.cost/2), hv = heavyCount(t), gd = ((t.s||'').match(/g/g) || []).length;
   let h = `<h3>${tier.name} · ${t.f} 層</h3>`;
   if (S.req && S.req.x === x && S.req.y === y) h += `<p class="ok">居民請求：${reqText()}（獎勵 ${S.req.reward} 金）</p>`;
   h += `${row('居民', `${b.res} 人`)}${row('幸福度', `${b.h}%`)}${row('疊樓精準度', `${Math.round(t.p*100)}%`)}
@@ -1364,6 +1619,10 @@ function showInfo(x,y){
     ${yes(b.shop,'附近有商店 +15','4 格內沒有商店')}
     ${yes(b.school,'附近有學校 +10','5 格內沒有學校')}
     ${b.hosp ? '<p class="ok">✔ 附近有醫院 +15</p>' : ''}
+    ${b.shrine ? '<p class="ok">✔ 附近有神社 +15</p>' : ''}
+    ${b.onsen ? '<p class="ok">✔ 附近有溫泉 +10</p>' : ''}
+    ${b.torii ? '<p class="ok">✔ 附近有鳥居 +5</p>' : ''}
+    ${b.style ? `<p class="${b.style > 0 ? 'ok' : 'no'}">${b.style > 0 ? '✔' : '✘'} ${tier.name} ${b.style > 0 ? '+' : '−'}${Math.abs(b.style)}</p>` : ''}
     ${b.water ? '<p class="ok">✔ 水岸景觀 +10</p>' : ''}
     ${b.hill ? '<p class="ok">✔ 山景 +10</p>' : ''}
     ${b.garden ? '<p class="ok">✔ 屋頂花園 +5</p>' : ''}
@@ -1380,11 +1639,41 @@ const hillMul = (x,y) => terr(x,y) === 2 ? 1.5 : 1;
 function showPicker(x,y){
   const m = hillMul(x,y);
   let h = `<h3>要蓋什麼？</h3>` + (roadAdj(x,y) ? '' : '<p class="no">這格沒接道路，蓋好也不會有人入住。</p>') + (m > 1 ? '<p class="dimtxt">山丘地基費用 +50%，但有山景加成。</p>' : '');
-  TIERS.forEach((t,i) => {
-    const lock = i > S.unlock, cost = Math.round(t.cost*m);
-    h += `<button class="pick" type="button" data-act="build" data-tier="${i}" ${lock || S.coins < cost ? 'disabled' : ''}><span>${t.name}${lock ? '（未解鎖）' : ''}</span><small>${lock ? `人口達 ${t.unlock} 解鎖` : `${cost} 金 · 最多 ${t.max} 層 · 每層住 ${t.pop} 人`}</small></button>`;
+  const heads = ['小房子', '公寓（周圍 8 格要有 1 棟小房子）', '大樓（周圍 8 格要有 2 棟公寓）'];
+  TIERS.forEach((tier,i) => {
+    const lock = i > S.unlock, rule = ruleOk(i,x,y);
+    h += `<p class="dimtxt">${heads[i]}</p>`;
+    STYLES[i].forEach(s => {
+      const cost = Math.round(s.cost*m);
+      const why = lock ? `人口達 ${tier.unlock} 解鎖` : !rule ? `不能蓋：${RULES[i]}（現在 ${i === 1 ? bldNeighbors(x,y,0) : bldNeighbors(x,y,1)} 棟）` : `${cost} 金 · 最多 ${s.max} 層 · 每層住 ${s.pop} 人 · ${s.d}`;
+      h += `<button class="pick" type="button" data-act="build" data-tier="${i}" data-st="${s.id}" ${lock || !rule || S.coins < cost ? 'disabled' : ''}><span>${s.n}${lock ? '（未解鎖）' : ''}</span><small>${why}</small></button>`;
+    });
   });
   panel(h);
+}
+function showJpPicker(x,y){
+  let h = `<h3>和風建築</h3>`;
+  JP.forEach(J => {
+    const lock = ST.pop < J.pop, built = J.unique && C(J.k) >= 1, fit = !J.big || canBig(x,y);
+    const why = lock ? `人口達 ${J.pop} 解鎖` : built ? '全城只能蓋一座，已經蓋了' : !fit ? '需要 2×2 空地（這格往右、往下各一格）' : `${J.cost} 金 · ${J.d}`;
+    h += `<button class="pick" type="button" data-act="jpb" data-k="${J.k}" ${lock || built || !fit || S.coins < J.cost ? 'disabled' : ''}><span>${J.n}</span><small>${why}</small></button>`;
+  });
+  panel(h);
+}
+function bridgeRun(x,y){
+  const run = d => { const at = n => d === 'h' ? [n,y] : [x,n]; let a = d === 'h' ? x : y, b = a;
+    const ok = n => { const [X,Y] = at(n); return get(X,Y)?.k === 'road' && terr(X,Y) === 1; };
+    while (ok(a-1)) a--; while (ok(b+1)) b++; return { d, a, b, len:b - a + 1, tiles:Array.from({length:b-a+1}, (_,k) => at(a+k)) }; };
+  const h = run('h'), v = run('v');
+  return h.len >= v.len ? h : v;
+}
+function showGrand(x,y){
+  const t = get(x,y);
+  if (t.grand) return showInfo(x,y);
+  const r = bridgeRun(x,y), lock = (S.level || 0) < 1;
+  panel(`<h3>升級成跨河大橋？</h3><p>把這段 ${r.len} 格的橋改建成紅色懸索大橋。</p><p class="dimtxt">全城幸福 +3、每格每小時觀光 +1.5 金，也會增加道路容量。</p>
+    ${r.len < 2 ? '<p class="no">橋至少要 2 格長，先把橋蓋過河。</p>' : ''}
+    <div class="btnrow"><button type="button" data-act="grand" ${lock || r.len < 2 || S.coins < GRAND_COST ? 'disabled' : ''}>改建（${GRAND_COST} 金）</button></div>`);
 }
 function showLandmarkPicker(x,y){
   let h = `<h3>選一座地標</h3><p class="dimtxt">每座地標整座城市只能蓋一次。</p>`;
@@ -1404,7 +1693,7 @@ function showBigPicker(x,y){
 }
 function showDemolish(x,y){
   let t = get(x,y); if (t.k === 'big'){ x = t.ax; y = t.ay; }
-  const nm = t.k === 'lm' ? LANDMARKS[t.id].name : t.k === 'big' ? NAMES[t.bk] : TIERS[t.t].name;
+  const nm = t.k === 'lm' ? LANDMARKS[t.id].name : t.k === 'big' ? NAMES[t.bk] : t.k === 'pagoda' ? '五重塔' : bspec(t).name;
   sel = { x, y };
   panel(`<h3>拆除${nm}？</h3><p>${t.k === 'bld' ? `${t.f} 層的建築` : '整座建築'}會消失，不會退錢。</p><div class="btnrow"><button type="button" data-act="demolish">確定拆除</button></div>`);
 }
@@ -1434,11 +1723,14 @@ function showHelp(){
     <p>2. 樓層會左右移動，點一下放下。對準就是「完美」，連續 3 次完美樓層會變寬。金色樓層對準有大獎勵；深色的重樓層比較難對，但住的人多一倍。</p>
     <p>3. 最後一層完美收尾，可以幫公寓和大樓裝上屋頂花園、停機坪或霓虹招牌。</p>
     <p>4. 公園、商店、學校、醫院讓居民更幸福；靠水和山丘的房子也比較搶手。工廠很賺錢但有污染。</p>
-    <p>5. 人口多了路上會塞車，多鋪路、做出環狀道路。河上可以蓋橋。</p>
-    <p>6. 城市會從村莊升級成小鎮、城市、大都會，每一級音樂都不一樣。小鎮之後可以買地擴張。</p>
-    <p>7. 四季輪替（每季 7 天），還會有地震、颱風、停電、煙火節、外星人和市長選舉。</p>
-    <p>8. 右上角「每日挑戰」每天一題，所有玩家題目都一樣，可以跟朋友比分數。</p>
-    <p class="dimtxt">電腦：滾輪縮放、拖曳移動、方向鍵平移、數字鍵切換工具、空白鍵放下樓層。手機：雙指縮放。</p>`);
+    <p>5. 房子有日式、英式、台式等造型。蓋公寓時周圍 8 格要有小房子，蓋大樓時周圍要有 2 棟公寓，城市才會由低到高自然長大。</p>
+    <p>6. 「和風」可以蓋鳥居、日式庭園、溫泉、五重塔和神社；有神社的話，夏天會辦夏祭り。河上的橋可以用「大型」改建成跨河大橋。</p>
+    <p>7. 高樓擋住後面時，把滑鼠移到後面的格子，或點右下角「透」開啟透視模式。</p>
+    <p>8. 人口多了路上會塞車，多鋪路、做出環狀道路。河上可以蓋橋。</p>
+    <p>9. 城市會從村莊升級成小鎮、城市、大都會，每一級音樂都不一樣。小鎮之後可以買地擴張。</p>
+    <p>10. 四季輪替（每季 7 天），還會有地震、颱風、停電、煙火節、外星人和市長選舉。</p>
+    <p>11. 右上角「每日挑戰」每天一題，所有玩家題目都一樣，可以跟朋友比分數。</p>
+    <p class="dimtxt">電腦：滾輪縮放、拖曳移動、方向鍵平移、數字鍵切換工具、X 切換透視、空白鍵放下樓層。手機：雙指縮放。</p>`);
 }
 function todayStr(){ const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`; }
 function todayChallenge(){
@@ -1476,10 +1768,38 @@ info.addEventListener('click', e => {
   if (!sel) return;
   const { x, y } = sel, t = get(x,y);
   if (a === 'build'){
-    const ti = +b.dataset.tier, cost = Math.round(TIERS[ti].cost*hillMul(x,y));
+    const ti = +b.dataset.tier, st = b.dataset.st || '', sp = bspec({ t:ti, st }), cost = Math.round(sp.cost*hillMul(x,y));
     if (t || ti > S.unlock) return;
+    if (!ruleOk(ti,x,y)) return toast(`不能蓋：${RULES[ti]}`);
     if (S.coins < cost) return toast('金幣不足');
-    S.coins -= cost; hidePanel(); startStack(x, y, ti, null, cost);
+    S.coins -= cost; hidePanel(); startStack(x, y, ti, null, cost, null, st);
+  } else if (a === 'jpb'){
+    const J = JP.find(q => q.k === b.dataset.k);
+    if (t || ST.pop < J.pop || (J.unique && C(J.k) >= 1) || (J.big && !canBig(x,y))) return;
+    if (S.coins < J.cost) return toast('金幣不足');
+    S.coins -= J.cost;
+    if (J.big) for (let dy=0; dy<2; dy++) for (let dx=0; dx<2; dx++) S.grid[idx(x+dx,y+dy)] = { k:'big', bk:J.k, ax:x, ay:y };
+    else S.grid[idx(x,y)] = J.k === 'jgarden' ? { k:'jgarden', bk:'park' } : { k:J.k };
+    hidePanel(); changed(); addLog(`${J.n}落成`);
+    const needRoad = J.k === 'onsen' || J.big;
+    toast(needRoad && !(J.big ? bigRoad(x,y) : roadAdj(x,y)) ? `${J.n}要接道路才有遊客` : `${J.n}落成！`);
+    beep(784,.12,'triangle'); setTimeout(() => beep(1046,.2,'sine',.04), 140);
+  } else if (a === 'grand'){
+    if (!t || t.k !== 'road' || terr(x,y) !== 1 || t.grand) return;
+    const r = bridgeRun(x,y);
+    if (r.len < 2 || (S.level || 0) < 1) return;
+    if (S.coins < GRAND_COST) return toast('金幣不足');
+    S.coins -= GRAND_COST;
+    for (const [X,Y] of r.tiles) S.grid[idx(X,Y)].grand = r.d;
+    hidePanel(); changed(); addLog('跨河大橋落成'); toast('跨河大橋落成！');
+    [523,659,784,1046].forEach((f,i) => setTimeout(() => beep(f,.15,'triangle'), i*120));
+  } else if (a === 'ungrand' && t?.grand){
+    const d = t.grand, at = n => d === 'h' ? get(n,y) : get(x,n);
+    let lo = d === 'h' ? x : y, hi = lo;
+    while (at(lo-1)?.grand === d) lo--;
+    while (at(hi+1)?.grand === d) hi++;
+    for (let n=lo; n<=hi; n++) delete at(n).grand;
+    hidePanel(); changed();
   } else if (a === 'lm'){
     const id = +b.dataset.id, L = LANDMARKS[id];
     if (t || ST.lmBuilt[id] || ST.pop < L.unlock) return;
@@ -1503,12 +1823,12 @@ info.addEventListener('click', e => {
     S.coins -= price; S.own[pidx(px,py)] = 1; S.bought = (S.bought || 0) + 1;
     hidePanel(); changed(); toast('買下新土地了！'); addLog('買下一塊新土地'); beep(660,.12,'triangle');
   } else if (a === 'add' && t?.k === 'bld'){
-    const c = Math.ceil(TIERS[t.t].cost/2);
+    const c = Math.ceil(bspec(t).cost/2);
     if (S.coins < c) return toast('金幣不足');
-    S.coins -= c; hidePanel(); startStack(x, y, t.t, t, c);
+    S.coins -= c; hidePanel(); startStack(x, y, t.t, t, c, null, t.st || '');
   } else if (a === 'demolish' && t){
     if (t.k === 'big'){ for (let dy=0; dy<2; dy++) for (let dx=0; dx<2; dx++) S.grid[idx(t.ax+dx,t.ay+dy)] = null; }
-    else if (t.k === 'bld' || t.k === 'lm') S.grid[idx(x,y)] = null;
+    else if (t.k === 'bld' || t.k === 'lm' || t.k === 'pagoda') S.grid[idx(x,y)] = null;
     beep(140,.2,'sawtooth'); hidePanel(); changed();
   }
 });
@@ -1520,10 +1840,11 @@ const sc = $('#sc'), sctx = sc.getContext('2d');
 const SW = 160, SH = 240, BASEW = 64, BASEL = (SW - BASEW)/2, GROUND = SH - 24;
 let SM = null;
 function env(){ return SM?.ch ? { weather:SM.ch.w, wind:WEATHER[SM.ch.w].w, windDir:SM.ch.dir } : { weather:S.weather, wind:S.wind, windDir:S.windDir }; }
-function startStack(x, y, ti, existing, paid, ch){
+function startStack(x, y, ti, existing, paid, ch, st){
   const floors = existing ? existing.w.map((w,i) => ({ l: BASEL + existing.o[i]*BASEW, w: w*BASEW, s:(existing.s || '')[i] || 'n' })) : [];
-  SM = { x, y, t:ti, ch:ch || null, floors, start:floors.length, cur:null, combo:0, maxCombo:0, perfects:0, golds:0, debris:[], parts:[], over:false, earned:0, camY:0, paid, shake:0, lastPerfect:false, roof:existing?.roof || '' };
-  SM.max = ch ? 99 : TIERS[ti].max;
+  SM = { x, y, t:ti, st:st || '', ch:ch || null, floors, start:floors.length, cur:null, combo:0, maxCombo:0, perfects:0, golds:0, debris:[], parts:[], over:false, earned:0, camY:0, paid, shake:0, lastPerfect:false, roof:existing?.roof || '' };
+  SM.spec = bspec({ t:ti, st:SM.st });
+  SM.max = ch ? 99 : SM.spec.max;
   SM.camY = camTarget();
   $('#sres').hidden = true; $('#sfinish').hidden = false; $('#sfinish').textContent = ch ? '結束挑戰' : '完工'; $('#stack').hidden = false;
   const E = env();
@@ -1540,7 +1861,7 @@ function spawn(){
 }
 const score = () => SM.floors.length - SM.start + SM.perfects + SM.golds*3;
 function updHead(){
-  const tier = TIERS[SM.t], n = SM.floors.length, E = env();
+  const tier = SM.spec, n = SM.floors.length, E = env();
   const wind = E.wind ? `${E.windDir > 0 ? '→' : '←'} ${E.wind >= .7 ? '狂' : E.wind >= .4 ? '強' : '弱'}` : '無';
   const k = SM.cur?.kind === 'g' ? '<span style="color:var(--gold)">金色樓層！</span>' : SM.cur?.kind === 'h' ? '<span style="color:var(--bad)">重樓層</span>' : '';
   $('#shead').innerHTML = (SM.ch ? `<span><span class="k">每日挑戰</span> ${SM.ch.n}</span><span><span class="k">分數</span> <b>${score()}</b></span>` : `<span><span class="k">${tier.name}</span> <b>${n}</b> / ${tier.max} 層</span>`) +
@@ -1604,7 +1925,7 @@ function endStack(reason){
     addLog(`每日挑戰「${c.n}」得到 ${sc0} 分`);
     changed(); saveNow();
   } else {
-    const tier = TIERS[SM.t], n = SM.floors.length, added = n - SM.start, i = idx(SM.x, SM.y);
+    const tier = SM.spec, n = SM.floors.length, added = n - SM.start, i = idx(SM.x, SM.y);
     let msg;
     if (added <= 0){
       S.coins += SM.paid;
@@ -1615,7 +1936,7 @@ function endStack(reason){
       const r2 = v => Math.round(v*100)/100;
       const ws = SM.floors.map(f => r2(f.w/BASEW)), os = SM.floors.map(f => r2((f.l - BASEL)/BASEW)), ss = SM.floors.map(f => f.s || 'n').join('');
       const p = r2(ws.reduce((a,b) => a+b, 0)/ws.length);
-      S.grid[i] = { k:'bld', t:SM.t, f:n, w:ws, o:os, p, s:ss, roof:SM.roof || undefined };
+      S.grid[i] = { k:'bld', t:SM.t, f:n, w:ws, o:os, p, s:ss, roof:SM.roof || undefined, st:SM.st || undefined };
       const head = reason === 'collapse' ? '樓層掉下去了！' : reason === 'max' ? '蓋到頂了！' : '完工！';
       const hv = (ss.match(/h/g) || []).length;
       msg = `<h3>${head}</h3><p>${tier.name}現在有 <b>${n}</b> 層（這次 +${added}）</p><p>可住 ${(n + hv)*tier.pop} 人 · 精準度 ${Math.round(p*100)}%</p>${SM.earned ? `<p>完美獎勵 +${SM.earned} 金</p>` : ''}${p < .65 ? '<p class="no">精準度偏低，地震時容易倒樓。</p>' : ''}${roadAdj(SM.x,SM.y) ? '' : '<p class="no">記得幫它接上道路，居民才會搬進來。</p>'}`;
@@ -1691,7 +2012,7 @@ function updStack(dt){
 }
 function renderStack(){
   if (!SM) return;
-  const c = sctx, tier = TIERS[SM.t], bh = tier.bh, cy = Math.round(SM.camY), E = env(), sea = SEASONS[season()];
+  const c = sctx, tier = SM.spec, bh = tier.bh, cy = Math.round(SM.camY), E = env(), sea = SEASONS[season()];
   let d = dark(); if (E.weather === 4) d = Math.max(d, .35);
   const sx = SM.shake ? Math.round((Math.random()-.5)*4) : 0;
   c.setTransform(1,0,0,1,sx,0);
@@ -1786,6 +2107,7 @@ addEventListener('keydown', e => {
   else if (k === '+' || k === '='){ zoom(1); }
   else if (k === '-'){ zoom(-1); }
   else if (k === 'Escape'){ hidePanel(); }
+  else if (k === 'x' || k === 'X'){ toggleXray(); }
   else if (k.length === 1 && k >= '1' && k <= '9'){ setTool(TOOL_ORDER[+k-1]); }
   else if (k === '0'){ setTool(TOOL_ORDER[9]); }
 });
