@@ -66,6 +66,19 @@ button:disabled{opacity:.45;cursor:not-allowed;filter:none}
 .pick{display:flex;flex-direction:column;align-items:flex-start;gap:2px;text-align:left}
 .pick small{color:var(--dim);font-size:12px}
 .btnrow{display:flex;flex-wrap:wrap;gap:8px;margin-top:4px}
+#cityBtn{color:var(--gold);max-width:12em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.panel input[type=text]{font:inherit;color:var(--ink);background:var(--edge);border:2px solid var(--panel2);padding:6px 8px;width:100%}
+.panel input[type=text]:focus-visible{outline:2px solid var(--gold);outline-offset:1px}
+.cityrow{display:flex;justify-content:space-between;align-items:center;gap:8px;padding-block:6px;border-bottom:1px solid var(--panel2)}
+.cityrow div{display:flex;flex-direction:column;min-width:0}
+.cityrow small{color:var(--dim);font-size:12px}
+.cityrow.cur b{color:var(--gold)}
+.cityrow b{font-weight:400}
+.cityrow .btnrow{margin:0;flex-wrap:nowrap}
+.cityrow button{padding:4px 8px;font-size:13px}
+.stars{color:var(--gold);letter-spacing:1px}
+.prog{height:6px;background:var(--edge);box-shadow:0 0 0 1px var(--panel2)}
+.prog i{display:block;height:100%;background:var(--good)}
 .ach{display:flex;gap:10px;align-items:flex-start;padding-block:4px}
 .ach i{flex:0 0 14px;height:14px;margin-top:3px;background:var(--panel2);box-shadow:0 0 0 2px var(--edge)}
 .ach.got i{background:var(--gold)}
@@ -103,8 +116,9 @@ button:disabled{opacity:.45;cursor:not-allowed;filter:none}
 
 <div id="app">
   <header id="hud">
+    <button id="cityBtn" type="button" aria-label="城市列表">城市</button>
     <div class="stat"><span class="k">金幣</span><b id="coins">0</b><span id="inc"></span></div>
-    <div class="stat"><span class="k">人口</span><b id="pop">0</b></div>
+    <div class="stat"><span class="k">人口</span><b id="pop">0</b><span class="k" id="tpop"></span></div>
     <div class="stat"><span class="k">幸福</span><b id="hap">—</b></div>
     <div class="stat"><span class="k">交通</span><b id="trf">順暢</b></div>
     <div class="stat"><b id="lvl">村莊</b></div>
@@ -157,8 +171,8 @@ button:disabled{opacity:.45;cursor:not-allowed;filter:none}
 (() => {
 'use strict';
 const $ = s => document.querySelector(s);
-const W = 44, H = 28, T = 16, M = 96, WW = W*T, WH = M + H*T;
-const PS = 4, PC = W/PS, PR = H/PS;
+const T = 16, M = 96, PS = 4;
+let W = 16, H = 12, WW = W*T, WH = M + H*T, PC = W/PS, PR = H/PS;
 const TIERS = [
   { name:'木屋', cost:20,  max:5,  pop:2, fh:3, bh:14, speed:46, unlock:0,   wall:'#e3b98c', wallD:'#b0825a', roof:'#c4503a', roofL:'#e3735c', win:'#5d7fa8' },
   { name:'公寓', cost:80,  max:15, pop:4, fh:3, bh:11, speed:58, unlock:50,  wall:'#c98f6a', wallD:'#935e43', roof:'#5b5e70', roofL:'#80849a', win:'#4f6d93' },
@@ -209,6 +223,7 @@ const JP = [
   { k:'shrine',  n:'神社',     cost:600, pop:100, d:'佔 2×2。5 格內幸福 +15、每小時觀光 +5，夏天會辦祭典', big:true },
 ];
 const GRAND_COST = 800;
+const jpCost = J => Math.round(J.cost*(S.theme === 'kyoto' ? .7 : 1));
 const ROOFS = { garden:{ n:'屋頂花園', d:'這棟幸福 +5' }, heli:{ n:'停機坪', d:'每小時 +2 金' }, neon:{ n:'霓虹招牌', d:'每小時 +1 金，晚上會發光' } };
 const LEVELS = [ { n:'村莊', pop:0 }, { n:'小鎮', pop:100, u:'解鎖買地、醫院、購物中心' }, { n:'城市', pop:400, u:'解鎖體育場' }, { n:'大都會', pop:1000, u:'金色樓層出現機率加倍' } ];
 const POLICIES = { green:{ n:'綠色城市', d:'公園的幸福加成從 +15 變 +25' }, econ:{ n:'經濟優先', d:'商店、購物中心、工廠收入 +25%' }, tour:{ n:'觀光立市', d:'地標、體育場觀光收入 +50%' } };
@@ -222,7 +237,7 @@ const CHALLENGES = [
   { n:'雪地公寓', w:5, tier:1, sp:1.1 },
 ];
 const N4 = [[1,0],[-1,0],[0,1],[0,-1]];
-const LS = 'pixel-stack-city-v1', PREFS = 'pixel-stack-city-prefs';
+const LS = 'pixel-stack-city-v2', PREFS = 'pixel-stack-city-prefs';
 const idx = (x,y) => y*W + x, inb = (x,y) => x>=0 && y>=0 && x<W && y<H;
 const pidx = (px,py) => py*PC + px;
 const get = (x,y) => inb(x,y) ? S.grid[idx(x,y)] : null;
@@ -231,57 +246,131 @@ const owned = (x,y) => inb(x,y) && !!S.own[pidx((x/PS)|0, (y/PS)|0)];
 const pad = n => String(n).padStart(2,'0');
 const clamp = (v,a,b) => Math.max(a, Math.min(b, v));
 const dayNo = () => Math.floor(S.min/1440) + 1;
-const season = () => Math.floor((dayNo()-1)/7) % 4;
+const season = () => S.theme === 'snow' ? 3 : Math.floor((dayNo()-1)/7) % 4;
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
 const hourNow = () => (S.min % 1440)/60;
 function hash(x,y){ let h = Math.imul(x|0,374761393) + Math.imul(y|0,668265263); h = Math.imul(h^(h>>>13),1274126177); return ((h^(h>>>16))>>>0)/4294967296; }
 function rng(seed){ return () => { seed = (Math.imul(seed,1664525)+1013904223)>>>0; return seed/4294967296; }; }
 
-let S, ST = { pop:0, happy:0, inc:0, res:{}, cnt:{}, maxF:[0,0,0], lmBuilt:[], cong:0, bridges:0, roofs:0 };
+let G, S, ST = { pop:0, happy:0, inc:0, res:{}, cnt:{}, maxF:[0,0,0], lmBuilt:[], cong:0, bridges:0, roofs:0 };
 const C = k => ST.cnt[k] || 0;
 
-/* ---------- new game, terrain, migration ---------- */
-function genTerrain(s, r, ownedTrees){
-  const G = s.grid, TR = s.terr, free = i => !G[i];
-  let rx = 28 + Math.floor(r()*4);
-  for (let y=0; y<H; y++){
-    if (y > 0) rx += [-1,0,0,1][Math.floor(r()*4)];
-    rx = clamp(rx, 25, 33);
-    for (const xx of [rx, rx+1]){ const i = idx(xx,y); if (free(i) || G[i].k === 'road') TR[i] = 1; }
+/* ---------- cities, stages, terrain ---------- */
+const STAGES = [
+  { w:16, h:12, pop:120,  hap:65 },
+  { w:24, h:16, pop:300,  hap:70 },
+  { w:28, h:20, pop:600,  hap:72 },
+  { w:36, h:24, pop:1000, hap:75 },
+  { w:44, h:28, pop:1500, hap:78 },
+];
+const stageInfo = n => n < STAGES.length ? STAGES[n] : { w:44, h:28, pop:1500 + 500*(n - STAGES.length + 1), hap:80 };
+const THEMES = {
+  valley:   { n:'河谷', d:'一條大河穿過城市，適合蓋跨河大橋' },
+  coast:    { n:'海岸', d:'城市面海，沙灘旁的房子很搶手' },
+  mountain: { n:'山城', d:'到處是山丘，地基貴但景色好' },
+  island:   { n:'島嶼', d:'四面環海，要靠橋對外連接' },
+  snow:     { n:'雪國', d:'終年下雪，溫泉觀光加倍' },
+  kyoto:    { n:'古都', d:'櫻花滿城，和風建築打七折' },
+};
+const MILES = [ { pop:0, n:'新手市長' }, { pop:300, n:'見習市長' }, { pop:1000, n:'資深市長' }, { pop:2500, n:'明星市長' }, { pop:5000, n:'傳奇市長' }, { pop:10000, n:'神級市長' }, { pop:20000, n:'城市之神' } ];
+const NAME_A = ['櫻','楓','星','月','海','山','青','白','金','雲','風','花','光','虹','松','竹','梅','霧','晴','朝'];
+const NAME_B = ['之丘','原','浦','川','港','町','崎','野','台','田','見','坂','島','森','谷','瀨'];
+const randomName = () => NAME_A[Math.floor(Math.random()*NAME_A.length)] + NAME_B[Math.floor(Math.random()*NAME_B.length)] + '市';
+function setDims(w,h){
+  W = w; H = h; WW = W*T; WH = M + H*T; PC = W/PS; PR = H/PS;
+  world.width = WW; world.height = WH; groundCv.width = WW; groundCv.height = WH; groundKey = '';
+}
+function genTerrain(s, r, theme){
+  const GR = s.grid, TR = s.terr, mid = H >> 1;
+  const setW = (x,y) => { if (inb(x,y)) TR[idx(x,y)] = 1; };
+  const blob = (cx,cy,rx,ry,v) => { for (let y=0; y<H; y++) for (let x=0; x<W; x++){ const dx = (x-cx)/rx, dy = (y-cy)/ry; if (dx*dx + dy*dy <= 1 && TR[idx(x,y)] === 0) TR[idx(x,y)] = v; } };
+  const river = (wid, at) => {
+    let rx = Math.floor(W*at);
+    for (let y=0; y<H; y++){ if (y > 0) rx += [-1,0,0,1][Math.floor(r()*4)]; rx = clamp(rx, 3, W-3-wid); for (let k=0; k<wid; k++) setW(rx+k, y); }
+  };
+  if (theme === 'valley' || theme === 'snow' || theme === 'kyoto'){
+    river(W >= 28 ? 3 : 2, .55 + r()*.2);
+    if (W >= 24) blob(W*.22, H*.78, W*.1, H*.13, 1);
+  } else if (theme === 'coast'){
+    const depth = Math.max(3, Math.round(H*.22));
+    for (let x=0; x<W; x++){
+      const d = depth + Math.round(Math.sin(x*.55 + r()*.6));
+      for (let y=H-d; y<H; y++) setW(x,y);
+      for (const sy of [H-d-1, H-d-2]) if (inb(x,sy) && TR[idx(x,sy)] === 0 && (sy === H-d-1 || r() < .5)) TR[idx(x,sy)] = 3;
+    }
+    if (W >= 24){ let rx = Math.floor(W*.3); for (let y=0; y<H; y++){ if (y > 0) rx += [-1,0,1][Math.floor(r()*3)]; rx = clamp(rx, 2, W-4); setW(rx,y); setW(rx+1,y); } }
+  } else if (theme === 'island'){
+    const b = W >= 28 ? 3 : 2;
+    for (let y=0; y<H; y++) for (let x=0; x<W; x++){
+      const e = Math.min(x, y, W-1-x, H-1-y) + (hash(x*3,y*5) < .3 ? 1 : 0) - (hash(x,y) < .2 ? 1 : 0);
+      if (e < b) TR[idx(x,y)] = 1; else if (e === b) TR[idx(x,y)] = 3;
+    }
+    if (W >= 24) blob(W*.5, H*.28, 2.5, 1.6, 1);
+  } else if (theme === 'mountain'){
+    for (let k=0; k<Math.round(W*H/70); k++) blob(r()*W, r()*H, 2 + r()*3, 1.5 + r()*2, 2);
+    river(1, .3 + r()*.4);
   }
-  for (let y=17; y<27; y++) for (let x=8; x<20; x++){ const dx = (x-13.5)/4.4, dy = (y-21.5)/2.9; if (dx*dx + dy*dy <= 1 && free(idx(x,y))) TR[idx(x,y)] = 1; }
-  for (const [cx,cy,rr] of [[15,6,3.3],[39,21,3.5],[3,9,2.8],[38,3,2.5]])
-    for (let y=0; y<H; y++) for (let x=0; x<W; x++){ if (Math.hypot(x-cx, (y-cy)*1.2) <= rr && TR[idx(x,y)] === 0) TR[idx(x,y)] = 2; }
-  for (let x=0; x<W; x++){ const i = idx(x,13); if (!G[i]) G[i] = { k:'road' }; }
+  if (theme !== 'mountain') for (let k=0; k<Math.round(W*H/300); k++) blob(r()*W, r()*H, 2 + r()*1.5, 1.6 + r(), 2);
+  for (let x=0; x<W; x++){ const i = idx(x,mid); if (!GR[i]) GR[i] = { k:'road' }; if (TR[i] > 1) TR[i] = 0; }
   for (let y=0; y<H; y++) for (let x=0; x<W; x++){
-    const i = idx(x,y); if (G[i] || TR[i] === 1 || Math.abs(y-13) < 2) continue;
+    const i = idx(x,y); if (GR[i] || TR[i] === 1 || Math.abs(y-mid) < 2) continue;
     const own = s.own[pidx((x/PS)|0,(y/PS)|0)];
-    if (own ? (ownedTrees && r() < .07) : r() < .45) G[i] = { k:'tree' };
+    if (own ? r() < (theme === 'kyoto' ? .1 : .06) : r() < .45) GR[i] = { k:'tree' };
   }
 }
-function newGame(){
-  const r = rng((Date.now() & 0xffffff) | 1);
-  const s = { v:3, coins:150, min:7*60, weather:0, wind:0, windDir:1, unlock:0, level:0,
+function newCity(stage, theme, name){
+  const si = stageInfo(stage); setDims(si.w, si.h);
+  const r = rng((Date.now() & 0xffffff) | 1), now0 = S ? S.min : 7*60;
+  const c = { v:4, id:G.nextId++, name, stage, theme, W, H, coins:150 + stage*100, min:now0, weather:theme === 'snow' ? 5 : 0, wind:0, windDir:1, unlock:0, level:0,
     grid:new Array(W*H).fill(null), terr:new Array(W*H).fill(0), own:new Array(PC*PR).fill(0), bought:0,
-    savedAt:0, quest:0, ach:{}, st:{}, log:[], evt:null, req:null, nextReq:1440, policy:null, daily:null };
-  for (let py=1; py<=5; py++) for (let px=2; px<=8; px++) s.own[pidx(px,py)] = 1;
-  genTerrain(s, r, true);
-  return s;
+    log:[], evt:null, req:null, nextReq:now0 + 1440, policy:null, popCache:0, incCache:0, happyCache:0, lastMin:now0, cleared:false,
+    yr:null, ratings:[], lotto:null, supportUntil:0 };
+  const ring = W >= 36;
+  for (let py=0; py<PR; py++) for (let px=0; px<PC; px++) c.own[pidx(px,py)] = ring && (px === 0 || py === 0 || px === PC-1 || py === PR-1) ? 0 : 1;
+  genTerrain(c, r, theme);
+  return c;
 }
-function migrate(o){
-  const g2 = new Array(W*H).fill(null);
-  o.grid.forEach((t,i) => { if (t) g2[idx(i%28 + 8, ((i/28)|0) + 4)] = t; });
-  o.grid = g2; o.terr = new Array(W*H).fill(0); o.own = new Array(PC*PR).fill(0); o.bought = 0;
-  for (let py=1; py<=5; py++) for (let px=2; px<=8; px++) o.own[pidx(px,py)] = 1;
-  genTerrain(o, rng(20261019), false);
-  o.v = 3;
+function newGlobal(){
+  G = { v:4, cur:0, cities:[], nextId:0, quest:0, ach:{}, st:{}, daily:null, tickets:1, shards:0, skins:{}, fortune:null, mile:0, savedAt:0 };
+  S = null;
+  G.cities.push(newCity(0, 'valley', randomName()));
+  return G;
 }
-function sanitize(o){
-  if (!o || typeof o !== 'object' || !Array.isArray(o.grid)) return null;
-  if (o.grid.length === 560) migrate(o);
-  if (o.grid.length !== W*H || !Array.isArray(o.terr) || !Array.isArray(o.own)) return null;
-  const s = Object.assign(newGame(), o);
-  s.ach = s.ach || {}; s.st = s.st || {}; s.log = Array.isArray(s.log) ? s.log : [];
-  return s;
+function loadGlobal(o){
+  if (!o || typeof o !== 'object' || o.v !== 4 || !Array.isArray(o.cities) || !o.cities.length) return null;
+  for (const c of o.cities) if (!Array.isArray(c.grid) || c.grid.length !== c.W*c.H || !Array.isArray(c.terr) || !Array.isArray(c.own)) return null;
+  const g0 = Object.assign({ cur:0, quest:0, ach:{}, st:{}, daily:null, tickets:0, shards:0, skins:{}, fortune:null, mile:0, nextId:o.cities.length, savedAt:0 }, o);
+  g0.cur = clamp(g0.cur|0, 0, g0.cities.length - 1);
+  for (const c of g0.cities){ c.log = Array.isArray(c.log) ? c.log : []; c.ratings = Array.isArray(c.ratings) ? c.ratings : []; }
+  return g0;
+}
+function enterCity(i){ G.cur = i; S = G.cities[i]; setDims(S.W, S.H); }
+const totalPop = () => G.cities.reduce((a,c) => a + (c === S ? ST.pop : (c.popCache || 0)), 0);
+const mileIdx = () => { const p = totalPop(); let k = 0; MILES.forEach((m,i) => { if (p >= m.pop) k = i; }); return k; };
+function switchCity(i){
+  if (i === G.cur || SM || !G.cities[i]) return;
+  const prev = S; prev.lastMin = prev.min; prev.popCache = ST.pop; prev.incCache = ST.inc; prev.happyCache = ST.happy;
+  const nowMin = prev.min, wth = prev.weather, wd = prev.windDir;
+  enterCity(i);
+  const hours = Math.max(0, (nowMin - (S.lastMin ?? nowMin))/60), off = Math.floor((S.incCache || 0)*hours*.5);
+  if (Math.floor(nowMin/1440) !== Math.floor((S.lastMin ?? nowMin)/1440)) S.evt = null;
+  S.min = nowMin; S.weather = S.theme === 'snow' ? 5 : (wth === 5 && season() !== 3 ? 2 : wth); S.wind = WEATHER[S.weather].w; S.windDir = wd;
+  S.coins += off; S.lastMin = nowMin;
+  resetWorld(); hidePanel();
+  showBanner(S.name, `第 ${S.stage + 1} 關 · ${THEMES[S.theme].n}${off ? ` · 離開期間收入 +${off} 金` : ''}`);
+}
+function createCity(theme, name){
+  if (SM) return;
+  const latest = G.cities[G.cities.length - 1];
+  if (!latest.cleared) return;
+  const prev = S; prev.lastMin = prev.min; prev.popCache = ST.pop; prev.incCache = ST.inc; prev.happyCache = ST.happy;
+  const c = newCity(latest.stage + 1, theme, name);
+  c.weather = theme === 'snow' ? 5 : prev.weather; c.windDir = prev.windDir; c.wind = WEATHER[c.weather].w;
+  G.cities.push(c);
+  enterCity(G.cities.length - 1);
+  addLog(`${name}成立了`); resetWorld(); hidePanel();
+  showBanner(`歡迎來到${name}`, `第 ${c.stage + 1} 關 · ${THEMES[theme].n}：${THEMES[theme].d}`);
+  scheduleSave();
 }
 function addLog(msg){ S.log.push({ d:dayNo(), m:msg }); if (S.log.length > 40) S.log.shift(); }
 
@@ -364,6 +453,19 @@ function compute(){
   if (u > S.unlock){ S.unlock = u; toast(`解鎖新建築：${TIERS[u].name}！`); beep(880,.25,'triangle'); markDirty(); }
   let L = S.level || 0; LEVELS.forEach((l,i) => { if (pop >= l.pop && i > L) L = i; });
   if (L > (S.level || 0)){ S.level = L; levelUp(L); }
+  snapshotCity();
+  const req = stageInfo(S.stage);
+  if (!S.cleared && pop >= req.pop && happy >= req.hap){
+    S.cleared = true; addLog('達成過關條件');
+    setTimeout(() => showBanner('過關！', S.stage === G.cities[G.cities.length-1].stage ? '點上方的城市名稱，建立下一座城市' : '這座城市達成了過關條件'), 600);
+    markDirty(); scheduleSave();
+  }
+  const mi = mileIdx();
+  if (mi > (G.mile || 0)){
+    G.mile = mi; G.tickets = (G.tickets || 0) + 2;
+    setTimeout(() => { showBanner(`總人口 ${MILES[mi].pop}！`, `稱號升級為「${MILES[mi].n}」，獲得 2 張扭蛋券`); beep(988,.2,'triangle'); }, 1400);
+    markDirty();
+  }
 }
 function changed(){ roadsCache = null; compute(); markDirty(); scheduleSave(); }
 function cutFloors(t, n){
@@ -429,7 +531,7 @@ function fireEvent(){
       cutFloors(t, n); lost += n; hit++;
     });
     const msg = lost ? `地震！${hit} 棟歪樓共倒了 ${lost} 層。疊得越整齊越耐震。` : total ? '地震！所有建築都穩穩撐住了。' : '輕微地震，城裡沒有損失。';
-    if (!lost && total >= 3) S.st.quakeSafe = 1;
+    if (!lost && total >= 3) G.st.quakeSafe = 1;
     toast(msg, true); addLog(msg); changed();
   } else if (e.k === 'typhoon'){
     mapShake = .8; beep(90,.6,'sawtooth',.05);
@@ -452,15 +554,15 @@ function fireEvent(){
   } else if (e.k === 'blackout'){
     const msg = '停電了！今晚城市一片漆黑，居民收入減少。'; toast(msg, true); addLog(msg); beep(110,.3,'square',.04); compute();
   } else if (e.k === 'fireworks'){
-    S.st.fireworks = 1;
+    G.st.fireworks = 1;
     const msg = `煙火節開始了！今天全城幸福 +10${C('stadium') ? '，體育場收入加倍' : ''}。`; toast(msg); addLog(msg); compute();
   } else if (e.k === 'matsuri'){
-    S.st.matsuri = 1;
+    G.st.matsuri = 1;
     const msg = '夏祭り開始了！街上掛滿燈籠，今天全城幸福 +10，神社觀光收入加倍。'; toast(msg); addLog(msg); compute();
     beep(587,.12,'triangle'); setTimeout(() => beep(784,.2,'triangle'), 140);
   } else if (e.k === 'hatsumode'){
     const gain = Math.floor((80 + ST.pop*.5)*(policy() === 'tour' ? 1.5 : 1));
-    S.coins += gain; S.st.hatsumode = 1;
+    S.coins += gain; G.st.hatsumode = 1;
     const msg = `新年初詣！大家到神社參拜，香油錢與觀光收入共 ${gain} 金。`; toast(msg); addLog(msg); markDirty();
     beep(880,.3,'sine',.05);
   } else if (e.k === 'ufo'){
@@ -471,7 +573,7 @@ function fireEvent(){
   } else if (e.k === 'election'){
     const ap = ST.pop ? ST.happy : 50;
     if (ap >= 55){
-      S.st.elected = (S.st.elected || 0) + 1; addLog(`市長選舉勝選（支持率 ${ap}%）`);
+      G.st.elected = (G.st.elected || 0) + 1; addLog(`市長選舉勝選（支持率 ${ap}%）`);
       sel = null;
       panel(`<h3>選舉勝選！</h3><p>支持率 ${ap}%，你連任市長了。選一個接下來 10 天的施政方針：</p>` +
         Object.entries(POLICIES).map(([k,p]) => `<button class="pick" type="button" data-act="policy" data-p="${k}"><span>${p.n}</span><small>${p.d}</small></button>`).join(''));
@@ -486,7 +588,7 @@ function updUfo(dt){
   if (!ufo) return;
   ufo.t += dt;
   if (!ufo.applied && ufo.t >= 5){
-    ufo.applied = true; S.st.ufo = 1;
+    ufo.applied = true; G.st.ufo = 1;
     const t = ufo.i >= 0 ? S.grid[ufo.i] : null;
     if (t?.k === 'bld'){
       const n = Math.min(3, bspec(t).max - t.f), top = t.f - 1;
@@ -520,7 +622,7 @@ function reqTick(){
     const t = get(R.x,R.y), nd = NEEDS.find(n => n.k === R.need);
     if (t?.k !== 'bld'){ S.req = null; return; }
     if (needMet(R.x,R.y,nd)){
-      S.coins += R.reward; S.st.req = (S.st.req || 0) + 1; S.req = null; S.nextReq = S.min + 1440*(.6 + Math.random()*.6);
+      S.coins += R.reward; G.st.req = (G.st.req || 0) + 1; S.req = null; S.nextReq = S.min + 1440*(.6 + Math.random()*.6);
       const msg = `居民很開心！請求完成，獲得 ${R.reward} 金。`; toast(msg); addLog(msg); beep(880,.15,'triangle'); markDirty();
     } else if (S.min > R.until){
       S.req = null; S.nextReq = S.min + 1440*.5; const msg = '居民等不到，放棄了他們的請求。'; toast(msg); addLog(msg); markDirty();
@@ -548,22 +650,23 @@ const QUESTS = [
   { ...popQ(20), r:50 },
   { t:'蓋一座公園', ok:() => C('park') >= 1, r:40 },
   { t:'蓋一家商店', ok:() => C('shop') >= 1, r:60 },
-  { t:'在河上蓋一座橋（道路可以蓋在水上）', ok:() => ST.bridges >= 1 && S.st.builtBridge, r:40 },
+  { t:'在河上蓋一座橋（道路可以蓋在水上）', ok:() => ST.bridges >= 1 && G.st.builtBridge, r:40 },
   { t:'疊出一棟 5 層木屋', ok:() => ST.maxF[0] >= 5, p:() => `${ST.maxF[0]}/5`, r:60 },
   { t:'蓋一所學校', ok:() => C('school') >= 1, r:80 },
   { t:'蓋一棟日式、英式或台式的小房子', ok:() => S.grid.some(t => t?.k === 'bld' && t.st), r:60 },
   { t:'用「和風」蓋一座鳥居', ok:() => C('torii') >= 1, r:50 },
   { ...popQ(50), t:'人口達到 50，解鎖公寓', r:100 },
-  { t:'一次疊樓連續 5 次完美', ok:() => (S.st.maxCombo||0) >= 5, p:() => `${S.st.maxCombo||0}/5`, r:100 },
-  { t:'完成一次居民請求', ok:() => (S.st.req||0) >= 1, r:80 },
+  { t:'一次疊樓連續 5 次完美', ok:() => (G.st.maxCombo||0) >= 5, p:() => `${G.st.maxCombo||0}/5`, r:100 },
+  { t:'完成一次居民請求', ok:() => (G.st.req||0) >= 1, r:80 },
   { t:'蓋一座工廠（別太靠近住家）', ok:() => C('factory') >= 1, r:100 },
   { t:'人口 30 以上，幸福度達到 80%', ok:() => ST.pop >= 30 && ST.happy >= 80, p:() => `${ST.happy}%`, r:150 },
   { ...popQ(100), t:'人口達到 100，升級成小鎮', r:150 },
-  { t:'買下第一塊新土地', ok:() => S.bought >= 1, r:150 },
+  { t:'達成第 1 關過關條件（人口 120、幸福 65%）', ok:() => G.cities[0].cleared, r:200 },
+  { t:'點上方城市名稱，建立第二座城市', ok:() => G.cities.length >= 2, r:300 },
   { t:'疊出一棟 15 層公寓', ok:() => ST.maxF[1] >= 15, p:() => `${ST.maxF[1]}/15`, r:200 },
   { t:'蓋一座醫院或購物中心', ok:() => C('hospital') + C('mall') >= 1, r:250 },
   { t:'蓋一座神社', ok:() => C('shrine') >= 1, r:250 },
-  { t:'完成一次每日挑戰', ok:() => (S.st.dailyPlays||0) >= 1, r:150 },
+  { t:'完成一次每日挑戰', ok:() => (G.st.dailyPlays||0) >= 1, r:150 },
   { t:'蓋第一座地標', ok:() => C('lm') >= 1, r:300 },
   { ...popQ(250), t:'人口達到 250，解鎖大樓', r:300 },
   { ...popQ(400), t:'人口達到 400，升級成城市', r:400 },
@@ -571,26 +674,29 @@ const QUESTS = [
   { t:'蓋一座體育場', ok:() => C('stadium') >= 1, r:500 },
   { t:'在河上蓋一座跨河大橋', ok:() => ST.grand >= 1, r:500 },
   { t:'蓋一座五重塔', ok:() => C('pagoda') >= 1, r:600 },
+  { t:'經營三座城市', ok:() => G.cities.length >= 3, p:() => `${G.cities.length}/3`, r:600 },
+  { t:'在大地圖買下第一塊新土地', ok:() => G.cities.some(c => c.bought >= 1), r:400 },
   { t:'蓋齊三座地標', ok:() => C('lm') >= 3, p:() => `${C('lm')}/3`, r:1500 },
+  { t:'總人口達到 2500', ok:() => totalPop() >= 2500, p:() => `${totalPop()}/2500`, r:1500 },
   { ...popQ(1000), t:'人口達到 1000，升級成大都會', r:2000 },
 ];
 const ACH = [
   { id:'first',   n:'第一塊磚',   d:'蓋好第一棟房子',                     ok:() => C('bld') >= 1 },
-  { id:'combo5',  n:'穩定手感',   d:'一次疊樓連續 5 次完美',              ok:() => (S.st.maxCombo||0) >= 5 },
-  { id:'combo15', n:'完美主義',   d:'一次疊樓連續 15 次完美',             ok:() => (S.st.maxCombo||0) >= 15 },
-  { id:'gold',    n:'金手指',     d:'完美對準一層金色樓層',               ok:() => !!S.st.gold },
+  { id:'combo5',  n:'穩定手感',   d:'一次疊樓連續 5 次完美',              ok:() => (G.st.maxCombo||0) >= 5 },
+  { id:'combo15', n:'完美主義',   d:'一次疊樓連續 15 次完美',             ok:() => (G.st.maxCombo||0) >= 15 },
+  { id:'gold',    n:'金手指',     d:'完美對準一層金色樓層',               ok:() => !!G.st.gold },
   { id:'flaw',    n:'一絲不苟',   d:'蓋出精準度 100% 的 5 層以上建築',    ok:() => S.grid.some(t => t?.k === 'bld' && t.f >= 5 && t.p >= .995) },
   { id:'roofs',   n:'屋頂設計師', d:'擁有 3 棟有屋頂裝飾的建築',          ok:() => ST.roofs >= 3 },
-  { id:'night',   n:'夜班工人',   d:'在晚上完成一次疊樓',                 ok:() => !!S.st.night },
-  { id:'storm',   n:'逆風而上',   d:'在強風或颱風天一次疊 10 層',         ok:() => !!S.st.storm },
-  { id:'quake',   n:'屹立不搖',   d:'城裡有 3 棟以上建築時，地震零損失',  ok:() => !!S.st.quakeSafe },
-  { id:'bridge',  n:'橋樑工程師', d:'擁有 5 格橋',                        ok:() => ST.bridges >= 5 && !!S.st.builtBridge },
-  { id:'land',    n:'大地主',     d:'買下 10 塊土地',                     ok:() => S.bought >= 10 },
+  { id:'night',   n:'夜班工人',   d:'在晚上完成一次疊樓',                 ok:() => !!G.st.night },
+  { id:'storm',   n:'逆風而上',   d:'在強風或颱風天一次疊 10 層',         ok:() => !!G.st.storm },
+  { id:'quake',   n:'屹立不搖',   d:'城裡有 3 棟以上建築時，地震零損失',  ok:() => !!G.st.quakeSafe },
+  { id:'bridge',  n:'橋樑工程師', d:'擁有 5 格橋',                        ok:() => ST.bridges >= 5 && !!G.st.builtBridge },
+  { id:'land',    n:'大地主',     d:'買下 10 塊土地',                     ok:() => G.cities.reduce((a,c) => a + (c.bought || 0), 0) >= 10 },
   { id:'traffic', n:'暢行無阻',   d:'人口 300 以上時交通完全順暢',        ok:() => ST.pop >= 300 && ST.cong < .01 },
-  { id:'req10',   n:'有求必應',   d:'完成 10 次居民請求',                 ok:() => (S.st.req||0) >= 10 },
-  { id:'fire',    n:'煙火之夜',   d:'經歷一次煙火節',                     ok:() => !!S.st.fireworks },
-  { id:'ufo',     n:'第三類接觸', d:'遇見外星人',                         ok:() => !!S.st.ufo },
-  { id:'elect',   n:'民選市長',   d:'贏得一次市長選舉',                   ok:() => (S.st.elected||0) >= 1 },
+  { id:'req10',   n:'有求必應',   d:'完成 10 次居民請求',                 ok:() => (G.st.req||0) >= 10 },
+  { id:'fire',    n:'煙火之夜',   d:'經歷一次煙火節',                     ok:() => !!G.st.fireworks },
+  { id:'ufo',     n:'第三類接觸', d:'遇見外星人',                         ok:() => !!G.st.ufo },
+  { id:'elect',   n:'民選市長',   d:'贏得一次市長選舉',                   ok:() => (G.st.elected||0) >= 1 },
   { id:'pop100',  n:'百人小鎮',   d:'人口達到 100',                       ok:() => ST.pop >= 100 },
   { id:'pop1000', n:'千人都市',   d:'人口達到 1000',                      ok:() => ST.pop >= 1000 },
   { id:'happy',   n:'幸福城市',   d:'人口 100 以上時幸福度達到 90%',      ok:() => ST.pop >= 100 && ST.happy >= 90 },
@@ -599,25 +705,28 @@ const ACH = [
   { id:'tour',    n:'觀光勝地',   d:'蓋齊三座地標',                       ok:() => C('lm') >= 3 },
   { id:'winter',  n:'四季輪轉',   d:'迎接第一個冬天',                     ok:() => dayNo() >= 22 },
   { id:'day30',   n:'老市長',     d:'經營到第 30 天',                     ok:() => dayNo() >= 30 },
-  { id:'daily30', n:'挑戰者',     d:'每日挑戰拿到 30 分以上',             ok:() => (S.st.dailyBest||0) >= 30 },
+  { id:'daily30', n:'挑戰者',     d:'每日挑戰拿到 30 分以上',             ok:() => (G.st.dailyBest||0) >= 30 },
   { id:'metro',   n:'大都會',     d:'城市等級達到大都會',                 ok:() => (S.level||0) >= 3 },
   { id:'world',   n:'異國風情',   d:'同時擁有日式、英式、台式三種房子',   ok:() => ['jp','uk','tw'].every(s => S.grid.some(t => t?.k === 'bld' && t.st === s)) },
   { id:'wa',      n:'和風之町',   d:'同時擁有鳥居、日式庭園、溫泉、五重塔和神社', ok:() => ['torii','jgarden','onsen','pagoda','shrine'].every(k => C(k) >= 1) },
-  { id:'matsuri', n:'夏祭り',     d:'經歷一次神社祭典',                   ok:() => !!S.st.matsuri },
-  { id:'hatsu',   n:'初詣',       d:'在神社迎接新年',                     ok:() => !!S.st.hatsumode },
+  { id:'matsuri', n:'夏祭り',     d:'經歷一次神社祭典',                   ok:() => !!G.st.matsuri },
+  { id:'hatsu',   n:'初詣',       d:'在神社迎接新年',                     ok:() => !!G.st.hatsumode },
   { id:'golden',  n:'金門',       d:'蓋一座跨河大橋',                     ok:() => ST.grand >= 1 },
+  { id:'city3',   n:'開拓者',     d:'經營三座城市',                       ok:() => G.cities.length >= 3 },
+  { id:'city6',   n:'城市聯盟',   d:'經營六座城市',                       ok:() => G.cities.length >= 6 },
+  { id:'tp5000',  n:'傳奇市長',   d:'總人口達到 5000',                    ok:() => totalPop() >= 5000 },
 ];
 function checkGoals(){
-  const q = QUESTS[S.quest];
+  const q = QUESTS[G.quest];
   if (q && q.ok()){
-    S.coins += q.r; S.quest++;
+    S.coins += q.r; G.quest++;
     toast(`任務完成：${q.t}，獲得 ${q.r} 金！`); addLog(`任務完成：${q.t}`);
     beep(660,.1,'triangle'); setTimeout(() => beep(990,.2,'triangle'), 110);
     changed();
   }
   for (const a of ACH){
-    if (S.ach[a.id] || !a.ok()) continue;
-    S.ach[a.id] = dayNo(); addLog(`獲得成就：${a.n}`);
+    if (G.ach[a.id] || !a.ok()) continue;
+    G.ach[a.id] = dayNo(); addLog(`獲得成就：${a.n}`);
     setTimeout(() => { toast(`獲得成就「${a.n}」：${a.d}`); beep(1046,.25,'square',.03); }, 1200);
     markDirty(); scheduleSave();
   }
@@ -625,9 +734,9 @@ function checkGoals(){
 }
 let lastQuestHtml = '';
 function renderQuest(){
-  const q = QUESTS[S.quest];
+  const q = QUESTS[G.quest];
   let html = q
-    ? `<div class="qc"><span class="k">任務 ${S.quest+1} / ${QUESTS.length}</span><span>${q.t}${q.p ? `（${q.p()}）` : ''}</span><span class="rw">獎勵 ${q.r} 金</span></div>`
+    ? `<div class="qc"><span class="k">任務 ${G.quest+1} / ${QUESTS.length}</span><span>${q.t}${q.p ? `（${q.p()}）` : ''}</span><span class="rw">獎勵 ${q.r} 金</span></div>`
     : `<div class="qc done"><span class="k">全部任務完成</span><span>你的城市由你決定，繼續自由建造吧！</span></div>`;
   if (S.req && get(S.req.x,S.req.y)?.k === 'bld'){
     const left = Math.max(0, S.req.until - S.min), hrs = Math.ceil(left/60);
@@ -638,21 +747,28 @@ function renderQuest(){
 $('#quest').addEventListener('click', e => { if (e.target.closest('[data-act="goreq"]') && S.req){ panTo(S.req.x, S.req.y); sel = { x:S.req.x, y:S.req.y }; showInfo(S.req.x, S.req.y); } });
 
 /* ---------- save ---------- */
-let dbRef = null, saving = false, saveWhere = '本機', saveTimer = 0, dirty = false, lastSavedCoins = -1;
-function markDirty(){ dirty = true; }
+let dbBase = null, saving = false, saveWhere = '本機', saveTimer = 0, dirty = false, lastSavedCoins = -1;
+const dirtyCities = new Set();
+function markDirty(){ dirty = true; if (S) dirtyCities.add(S.id); }
 function scheduleSave(){ clearTimeout(saveTimer); saveTimer = setTimeout(saveNow, 2500); }
+function snapshotCity(){ S.popCache = ST.pop; S.incCache = ST.inc; S.happyCache = ST.happy; }
 async function saveNow(){
   if (saving){ scheduleSave(); return; }
-  S.savedAt = Date.now(); dirty = false; lastSavedCoins = Math.floor(S.coins);
-  const json = JSON.stringify(S);
-  try { localStorage.setItem(LS, json); } catch {}
-  if (dbRef){
+  snapshotCity();
+  G.savedAt = Date.now(); dirty = false; lastSavedCoins = Math.floor(S.coins);
+  dirtyCities.add(S.id);
+  try { localStorage.setItem(LS, JSON.stringify(G)); } catch {}
+  if (dbBase){
     saving = true;
-    try { await dbRef.set({ json, savedAt:S.savedAt }); saveWhere = '雲端'; }
-    catch { saveWhere = '本機'; }
+    try {
+      const ids = [...dirtyCities]; dirtyCities.clear();
+      for (const id of ids){ const c = G.cities.find(q => q.id === id); if (c) await dbBase.doc('city' + id).set({ json:JSON.stringify(c), savedAt:G.savedAt }); }
+      await dbBase.doc('meta').set({ json:JSON.stringify({ ...G, cities:G.cities.map(c => ({ id:c.id })) }), savedAt:G.savedAt });
+      saveWhere = '雲端';
+    } catch { saveWhere = '本機'; }
     saving = false;
   }
-  const d = new Date(S.savedAt);
+  const d = new Date(G.savedAt);
   $('#saved').textContent = `已存檔（${saveWhere}）${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 function loadLocal(){ try { const s = localStorage.getItem(LS); return s ? JSON.parse(s) : null; } catch { return null; } }
@@ -664,18 +780,18 @@ async function connectCloud(){
     const [db, user] = await Promise.all([claude.use('db'), claude.use('user')]);
     if (!db || !user) return;
     const id = await user.id(); if (!id) return;
-    dbRef = db.doc('data/users/' + id + '/save');
-    const snap = await dbRef.get();
-    if (snap.exists){
-      const d = snap.data();
-      if ((d.savedAt||0) > (S.savedAt||0)){
-        const s = sanitize(JSON.parse(d.json));
-        if (s){ S = s; resetWorld(); toast('已載入雲端存檔'); }
-      }
+    dbBase = { doc: name => db.doc('data/users/' + id + '/v2_' + name) };
+    const meta = await dbBase.doc('meta').get();
+    if (meta.exists && (meta.data().savedAt || 0) > (G.savedAt || 0)){
+      const m = JSON.parse(meta.data().json), cities = [];
+      for (const c of m.cities){ const snap = await dbBase.doc('city' + c.id).get(); if (!snap.exists) { cities.length = 0; break; } cities.push(JSON.parse(snap.data().json)); }
+      const g2 = cities.length ? loadGlobal({ ...m, cities }) : null;
+      if (g2 && !SM){ G = g2; enterCity(G.cur); resetWorld(); toast('已載入雲端存檔'); }
     }
     saveWhere = '雲端';
-    if (S.savedAt) saveNow();
-  } catch { dbRef = null; }
+    G.cities.forEach(c => dirtyCities.add(c.id));
+    if (G.savedAt) saveNow();
+  } catch { dbBase = null; }
 }
 
 /* ---------- sound & music ---------- */
@@ -777,10 +893,10 @@ function paintGround(){
       waterTiles.push(idx(x,y));
       continue;
     }
-    c.fillStyle = tt === 2 ? sea.hill : sea.grass[hash(x,y) < .5 ? 0 : 1]; c.fillRect(px,py,T,T);
+    c.fillStyle = tt === 2 ? sea.hill : tt === 3 ? (sea.snow ? '#e9eef1' : '#e6d4a0') : sea.grass[hash(x,y) < .5 ? 0 : 1]; c.fillRect(px,py,T,T);
     for (let k=0; k<5; k++){
       const a = hash(x*5+k, y*3+7), bx = hash(x*3+k+1, y*5+11), by = hash(x*7+k+2, y*9+13);
-      c.fillStyle = a < .1 ? sea.dots[0] : a < .18 ? sea.dots[1] : sea.dots[2];
+      c.fillStyle = tt === 3 ? (a < .3 ? '#f4ead0' : '#cdb985') : a < .1 ? sea.dots[0] : a < .18 ? sea.dots[1] : sea.dots[2];
       c.fillRect(px + Math.floor(bx*15), py + Math.floor(by*15), 1, a < .18 ? 1 : 2);
     }
     if (tt === 2){
@@ -791,7 +907,7 @@ function paintGround(){
       if (hash(x+8,y+2) < .4) c.fillRect(px+8,py+11,5,1);
     }
   }
-  groundKey = season() + ':' + S.v + ':' + S.terr.length;
+  groundKey = season() + ':' + S.id + ':' + W;
 }
 
 let lights = [], glows = [], hover = null, sel = null, now = 0;
@@ -1270,7 +1386,7 @@ function updFireworks(dt){
     fwT -= dt;
     if (fwT <= 0){
       fwT = .35 + Math.random()*.5;
-      const cx = (8 + Math.random()*28)*T, cy = M + (2 + Math.random()*10)*T, hue = Math.floor(Math.random()*360);
+      const cx = (1 + Math.random()*(W-2))*T, cy = M + (1 + Math.random()*H*.5)*T, hue = Math.floor(Math.random()*360);
       for (let i=0; i<26; i++){ const a = i/26*Math.PI*2, sp = 22 + Math.random()*16; fw.push({ x:cx, y:cy, vx:Math.cos(a)*sp, vy:Math.sin(a)*sp, life:1.3, col:`hsl(${hue + (i%3)*25},95%,65%)` }); }
       if (prefs.sound && Math.random() < .5) beep(180 + Math.random()*80, .12, 'triangle', .02);
     }
@@ -1280,7 +1396,7 @@ function updFireworks(dt){
 }
 function drawUfo(){
   if (!ufo) return;
-  const t = ufo.t, tg = ufo.i >= 0 ? ufo.i : idx(22,10), tx = (tg%W)*T + 8, ty = M + ((tg/W)|0)*T - 50;
+  const t = ufo.t, tg = ufo.i >= 0 ? ufo.i : idx(W>>1, H>>1), tx = (tg%W)*T + 8, ty = M + ((tg/W)|0)*T - 50;
   let x, y;
   if (t < 3){ const k = t/3; x = -20 + (tx + 20)*k; y = M - 40 + (ty - M + 40)*k; }
   else if (t < 5.5){ x = tx; y = ty + Math.sin(t*6); }
@@ -1306,7 +1422,7 @@ function occludes(x, y, hpx){
   return false;
 }
 function renderWorld(dt){
-  if (groundKey !== season() + ':' + S.v + ':' + S.terr.length) paintGround();
+  if (groundKey !== season() + ':' + S.id + ':' + W) paintGround();
   g.drawImage(groundCv, 0, 0); lights = []; glows = [];
   const sea = SEASONS[season()];
   if (!sea.snow){ g.fillStyle = sea.waterL; for (const i of waterTiles) if (hash(i, Math.floor(now*2)) < .12) g.fillRect((i%W)*T + 3 + Math.floor(hash(i,7)*8), M + ((i/W)|0)*T + 4 + Math.floor(hash(7,i)*7), 2, 1); }
@@ -1517,7 +1633,7 @@ function paintRoad(t){
   const bridge = S.terr[i] === 1, cost = bridge ? BRIDGE : COST.road;
   if (S.coins < cost){ toast('金幣不足'); return; }
   S.coins -= cost; S.grid[i] = { k:'road' }; beep(bridge ? 260 : 330,.04);
-  if (bridge) S.st.builtBridge = 1;
+  if (bridge) G.st.builtBridge = 1;
   changed();
 }
 function place(x,y,k){
@@ -1585,6 +1701,7 @@ function showInfo(x,y){
   if (!owned(x,y)) return panel(`<h3>未開發的土地</h3><p>城市升級為「小鎮」後，可以用「買地」買下相鄰的土地。</p>`);
   if (!t){
     if (tt === 1) return panel(`<h3>水域</h3><p>河流和湖泊。用「道路」可以在上面蓋橋（25 金/格）。</p><p class="dimtxt">2 格內有水的房子幸福 +10。</p>`);
+    if (tt === 3) return panel(`<h3>沙灘</h3><p>可以蓋房子。靠海的房子有水岸景觀 +10。</p>${yes(roadAdj(x,y),'旁邊有道路','旁邊沒有道路')}`);
     return panel(`<h3>${tt === 2 ? '山丘' : '空地'}</h3>${tt === 2 ? '<p>蓋在山丘上的房子有山景（幸福 +10），但地基費用多 50%。</p>' : '<p>切換到「蓋樓」就能在這裡疊房子。</p>'}${yes(roadAdj(x,y),'旁邊有道路','旁邊沒有道路')}`);
   }
   if (t.k === 'tree') return panel(`<h3>樹林</h3><p>自然的樹。用「拆除」可以免費清掉。</p>`);
@@ -1655,8 +1772,8 @@ function showJpPicker(x,y){
   let h = `<h3>和風建築</h3>`;
   JP.forEach(J => {
     const lock = ST.pop < J.pop, built = J.unique && C(J.k) >= 1, fit = !J.big || canBig(x,y);
-    const why = lock ? `人口達 ${J.pop} 解鎖` : built ? '全城只能蓋一座，已經蓋了' : !fit ? '需要 2×2 空地（這格往右、往下各一格）' : `${J.cost} 金 · ${J.d}`;
-    h += `<button class="pick" type="button" data-act="jpb" data-k="${J.k}" ${lock || built || !fit || S.coins < J.cost ? 'disabled' : ''}><span>${J.n}</span><small>${why}</small></button>`;
+    const why = lock ? `人口達 ${J.pop} 解鎖` : built ? '全城只能蓋一座，已經蓋了' : !fit ? '需要 2×2 空地（這格往右、往下各一格）' : `${jpCost(J)} 金 · ${J.d}`;
+    h += `<button class="pick" type="button" data-act="jpb" data-k="${J.k}" ${lock || built || !fit || S.coins < jpCost(J) ? 'disabled' : ''}><span>${J.n}</span><small>${why}</small></button>`;
   });
   panel(h);
 }
@@ -1699,18 +1816,18 @@ function showDemolish(x,y){
 }
 function showMenu(step){
   sel = null;
-  if (step === 'new') return panel(`<h3>開新城市？</h3><p class="no">目前的城市會被清除，無法復原。</p><div class="btnrow"><button type="button" data-act="newgo">確定重新開始</button></div>`);
-  const got = ACH.filter(a => S.ach[a.id]).length, pol = policy();
+  if (step === 'new') return panel(`<h3>全部重新開始？</h3><p class="no">所有城市、成就和任務進度都會被清除，無法復原。</p><div class="btnrow"><button type="button" data-act="newgo">確定重新開始</button></div>`);
+  const got = ACH.filter(a => G.ach[a.id]).length, pol = policy();
   panel(`<h3>選單</h3>
     ${pol ? `<p>施政方針：<b>${POLICIES[pol].n}</b>（${POLICIES[pol].d}，到第 ${Math.floor(S.policy.until/1440)+1} 天）</p>` : ''}
     <div class="btnrow"><button type="button" data-act="help">玩法說明</button><button type="button" data-act="achs">成就 ${got}/${ACH.length}</button><button type="button" data-act="logs">事件紀錄</button></div>
     <div class="btnrow"><button type="button" data-act="daily">每日挑戰</button><button type="button" data-act="music">音樂：${prefs.music?'開':'關'}</button><button type="button" data-act="sound">音效：${prefs.sound?'開':'關'}</button></div>
-    <div class="btnrow"><button type="button" data-act="savenow">立即存檔</button><button type="button" data-act="new">開新城市</button></div>
-    <p class="dimtxt">${dbRef ? '遊戲會自動存檔到雲端，換裝置也能接著玩。' : '遊戲會自動存檔在這台裝置的瀏覽器裡。'}</p>`);
+    <div class="btnrow"><button type="button" data-act="savenow">立即存檔</button><button type="button" data-act="new">全部重新開始</button></div>
+    <p class="dimtxt">${dbBase ? '遊戲會自動存檔到雲端，換裝置也能接著玩。' : '遊戲會自動存檔在這台裝置的瀏覽器裡。'}</p>`);
 }
 function showAchs(){
-  let h = `<h3>成就 ${ACH.filter(a => S.ach[a.id]).length} / ${ACH.length}</h3>`;
-  for (const a of ACH){ const d = S.ach[a.id]; h += `<div class="ach ${d ? 'got' : ''}"><i></i><div><b>${a.n}</b><small>${a.d}${d ? ` · 第 ${d} 天達成` : ''}</small></div></div>`; }
+  let h = `<h3>成就 ${ACH.filter(a => G.ach[a.id]).length} / ${ACH.length}</h3>`;
+  for (const a of ACH){ const d = G.ach[a.id]; h += `<div class="ach ${d ? 'got' : ''}"><i></i><div><b>${a.n}</b><small>${a.d}${d ? ` · 第 ${d} 天達成` : ''}</small></div></div>`; }
   panel(h);
 }
 function showLogs(){
@@ -1740,7 +1857,7 @@ function todayChallenge(){
   return { ...c, dir:(h >>> 8) & 1 ? 1 : -1, date:s };
 }
 function showDaily(){
-  const c = todayChallenge(), D = S.daily?.date === c.date ? S.daily : null;
+  const c = todayChallenge(), D = G.daily?.date === c.date ? G.daily : null;
   sel = null;
   panel(`<h3>每日挑戰 · ${c.date}</h3>
     <p>今天的題目：<b>${c.n}</b></p>
@@ -1749,6 +1866,46 @@ function showDaily(){
     ${row('今日最佳', D ? `${D.best} 分` : '還沒挑戰')}
     <p class="dimtxt">每天的題目對所有玩家都一樣，可以和朋友比分數。今天第一次完成可以拿「分數 ×5」金幣。</p>
     <div class="btnrow"><button type="button" data-act="chgo">開始挑戰</button></div>`);
+}
+const starStr = n => { const f = Math.floor(n), h = n - f >= .5; return '★'.repeat(f) + (h ? '☆' : '') + '·'.repeat(Math.max(0, 5 - f - (h ? 1 : 0))); };
+function cityPop(c){ return c === S ? ST.pop : (c.popCache || 0); }
+function showCities(step, arg){
+  sel = null;
+  const latest = G.cities[G.cities.length - 1];
+  if (step === 'new'){
+    if (!latest.cleared) return showCities();
+    if (!G.themeOpts){
+      const pool = Object.keys(THEMES).filter(k => latest.stage + 1 >= 2 || (k !== 'snow' && k !== 'kyoto'));
+      for (let i = pool.length - 1; i > 0; i--){ const j = Math.floor(Math.random()*(i+1)); [pool[i], pool[j]] = [pool[j], pool[i]]; }
+      G.themeOpts = pool.slice(0, 3);
+    }
+    const si = stageInfo(latest.stage + 1);
+    return panel(`<h3>建立第 ${latest.stage + 2} 關的城市</h3><p>地圖 ${si.w}×${si.h} 格。過關條件：人口 ${si.pop}、幸福 ${si.hap}%。</p>
+      <label class="dimtxt" for="cityName">城市名稱</label><input type="text" id="cityName" maxlength="8" value="${esc(randomName())}">
+      <p class="dimtxt">選一種地形：</p>${G.themeOpts.map(k => `<button class="pick" type="button" data-act="mkcity" data-th="${k}"><span>${THEMES[k].n}</span><small>${THEMES[k].d}</small></button>`).join('')}
+      <p class="dimtxt">新城市有自己的金幣。原本的城市會保留，沒在玩時以一半速度累積收入。</p>`);
+  }
+  if (step === 'rename') return panel(`<h3>幫城市改名</h3><label class="dimtxt" for="cityName">城市名稱</label><input type="text" id="cityName" maxlength="8" value="${esc(S.name)}"><div class="btnrow"><button type="button" data-act="dorename">確定</button></div>`);
+  if (step === 'send'){
+    const c = G.cities[arg];
+    const amts = [100, 500, 1000, Math.floor(S.coins/2)].filter((v,i,a) => v > 0 && a.indexOf(v) === i);
+    return panel(`<h3>送物資到${esc(c.name)}</h3><p>從${esc(S.name)}（${Math.floor(S.coins)} 金）送金幣過去。</p><div class="btnrow">${amts.map(v => `<button type="button" data-act="dosend" data-i="${arg}" data-amt="${v}" ${S.coins < v ? 'disabled' : ''}>${v} 金</button>`).join('')}</div>`);
+  }
+  const tp = totalPop(), mi = mileIdx(), next = MILES[mi + 1], req = stageInfo(S.stage);
+  let h = `<h3>${esc(S.name)}</h3>
+    <p class="dimtxt">第 ${S.stage + 1} 關 · ${THEMES[S.theme].n} · ${W}×${H} 格</p>
+    ${row('過關條件', S.cleared ? '<span class="ok">已達成</span>' : `人口 ${ST.pop}/${req.pop} · 幸福 ${ST.happy}/${req.hap}%`)}
+    ${S.cleared ? '' : `<div class="prog"><i style="width:${Math.round(Math.min(1, ST.pop/req.pop)*100)}%"></i></div>`}
+    <div class="btnrow"><button type="button" data-act="rename">改名</button>${latest.cleared ? '<button type="button" data-act="newcity">建立新城市</button>' : ''}</div>
+    ${row('總人口', `${tp}`)}${row('市長稱號', `${MILES[mi].n}${next ? `（下一級 ${next.pop}）` : ''}`)}
+    <p class="dimtxt">所有城市</p>`;
+  G.cities.forEach((c,i) => {
+    const r = c.ratings[c.ratings.length - 1];
+    h += `<div class="cityrow ${c === S ? 'cur' : ''}"><div><b>${esc(c.name)}</b><small>第 ${c.stage + 1} 關 · ${THEMES[c.theme].n} · 人口 ${cityPop(c)} · ${Math.floor(c.coins)} 金${r ? ` · <span class="stars">${starStr(r.stars)}</span>` : ''}${c.cleared ? ' · 已過關' : ''}</small></div>
+      ${c === S ? '<small>目前所在</small>' : `<div class="btnrow"><button type="button" data-act="go" data-i="${i}">前往</button><button type="button" data-act="send" data-i="${i}">送物資</button></div>`}</div>`;
+  });
+  if (!latest.cleared) h += `<p class="dimtxt">讓「${esc(latest.name)}」達成過關條件，就能建立下一座城市。</p>`;
+  panel(h);
 }
 info.addEventListener('click', e => {
   const b = e.target.closest('[data-act]'); if (!b) return;
@@ -1763,8 +1920,22 @@ info.addEventListener('click', e => {
   if (a === 'sound'){ prefs.sound = !prefs.sound; savePrefs(); return showMenu(); }
   if (a === 'savenow'){ saveNow(); toast('已存檔'); return; }
   if (a === 'new') return showMenu('new');
-  if (a === 'newgo'){ S = newGame(); resetWorld(); saveNow(); showHelp(); return; }
+  if (a === 'newgo'){ newGlobal(); enterCity(0); resetWorld(); G.cities.forEach(c => dirtyCities.add(c.id)); saveNow(); showHelp(); return; }
   if (a === 'policy'){ const k = b.dataset.p; S.policy = { k, until:S.min + 10*1440 }; addLog(`施政方針：${POLICIES[k].n}`); toast(`接下來 10 天：${POLICIES[k].n}`); hidePanel(); changed(); return; }
+  if (a === 'cities') return showCities();
+  if (a === 'newcity') return showCities('new');
+  if (a === 'rename') return showCities('rename');
+  if (a === 'dorename'){ const v = ($('#cityName').value || '').trim().slice(0, 8); if (v){ S.name = v; addLog(`城市改名為${v}`); markDirty(); scheduleSave(); } return showCities(); }
+  if (a === 'mkcity'){ const v = ($('#cityName').value || '').trim().slice(0, 8) || randomName(); const th = b.dataset.th; G.themeOpts = null; return createCity(th, v); }
+  if (a === 'go'){ switchCity(+b.dataset.i); return; }
+  if (a === 'send') return showCities('send', +b.dataset.i);
+  if (a === 'dosend'){
+    const c = G.cities[+b.dataset.i], v = +b.dataset.amt;
+    if (!c || c === S || S.coins < v) return;
+    S.coins -= v; c.coins += v; dirtyCities.add(c.id); markDirty(); scheduleSave();
+    addLog(`送 ${v} 金到${c.name}`); c.log.push({ d:dayNo(), m:`收到${S.name}送來的 ${v} 金` });
+    toast(`已送 ${v} 金到${c.name}`); beep(660,.1,'triangle'); return showCities();
+  }
   if (!sel) return;
   const { x, y } = sel, t = get(x,y);
   if (a === 'build'){
@@ -1776,8 +1947,8 @@ info.addEventListener('click', e => {
   } else if (a === 'jpb'){
     const J = JP.find(q => q.k === b.dataset.k);
     if (t || ST.pop < J.pop || (J.unique && C(J.k) >= 1) || (J.big && !canBig(x,y))) return;
-    if (S.coins < J.cost) return toast('金幣不足');
-    S.coins -= J.cost;
+    if (S.coins < jpCost(J)) return toast('金幣不足');
+    S.coins -= jpCost(J);
     if (J.big) for (let dy=0; dy<2; dy++) for (let dx=0; dx<2; dx++) S.grid[idx(x+dx,y+dy)] = { k:'big', bk:J.k, ax:x, ay:y };
     else S.grid[idx(x,y)] = J.k === 'jgarden' ? { k:'jgarden', bk:'park' } : { k:J.k };
     hidePanel(); changed(); addLog(`${J.n}落成`);
@@ -1833,6 +2004,7 @@ info.addEventListener('click', e => {
   }
 });
 $('#menuBtn').onclick = () => showMenu();
+$('#cityBtn').onclick = () => { if (!SM) showCities(); };
 $('#chBtn').onclick = () => { if (!SM) showDaily(); };
 
 /* ---------- stacking mini-game ---------- */
@@ -1885,7 +2057,7 @@ function drop(){
     if (!SM.ch){ S.coins += 2; SM.earned += 2; }
     if (SM.combo >= 3 && w < BASEW){ const gw = Math.min(4, BASEW - w); w += gw; l -= gw/2; msg = `完美 ×${SM.combo}！樓層變寬`; }
     if (c.kind === 'g'){
-      SM.golds++; S.st.gold = 1;
+      SM.golds++; G.st.gold = 1;
       if (!SM.ch){ const bonus = 15*(SM.t+1)*(1 + Math.floor(SM.combo/3)); S.coins += bonus; SM.earned += bonus; msg = `金色完美！+${bonus} 金`; } else msg = '金色完美！+3 分';
       beep(1318,.25,'triangle',.05);
     }
@@ -1910,14 +2082,14 @@ function drop(){
 function endStack(reason){
   if (!SM || SM.over) return;
   SM.over = true; SM.cur = null;
-  S.st.maxCombo = Math.max(S.st.maxCombo || 0, SM.maxCombo);
+  G.st.maxCombo = Math.max(G.st.maxCombo || 0, SM.maxCombo);
   const r = $('#sres');
   if (SM.ch){
-    const sc0 = score(), c = SM.ch, prev = S.daily?.date === c.date ? S.daily : null;
+    const sc0 = score(), c = SM.ch, prev = G.daily?.date === c.date ? G.daily : null;
     const best = Math.max(sc0, prev?.best || 0), first = !prev?.claimed;
     const reward = first ? sc0*5 : 0;
-    S.daily = { date:c.date, best, claimed:true };
-    S.coins += reward; S.st.dailyPlays = (S.st.dailyPlays || 0) + 1; S.st.dailyBest = Math.max(S.st.dailyBest || 0, sc0);
+    G.daily = { date:c.date, best, claimed:true };
+    S.coins += reward; G.st.dailyPlays = (G.st.dailyPlays || 0) + 1; G.st.dailyBest = Math.max(G.st.dailyBest || 0, sc0);
     const share = `像素疊城 每日挑戰 ${c.date}「${c.n}」：${sc0} 分（${SM.floors.length} 層、完美 ${SM.perfects} 次${SM.golds ? `、金色 ${SM.golds}` : ''}）`;
     r.innerHTML = `<h3>${reason === 'collapse' ? '倒了！' : '挑戰結束'}</h3><p>本次 <b>${sc0}</b> 分 · 今日最佳 ${best} 分</p><p>${SM.floors.length} 層 · 完美 ${SM.perfects} 次 · 最高連擊 ${SM.maxCombo}</p>${reward ? `<p>今日首次完成獎勵 +${reward} 金</p>` : '<p class="dimtxt">今天的金幣獎勵已經領過了，可以繼續挑戰最高分。</p>'}
       <p class="share" id="shareTxt"></p><div class="btnrow"><button type="button" data-act="copy">複製成績</button><button type="button" data-act="retry">再挑戰一次</button><button type="button" data-act="back">回到城市</button></div>`;
@@ -1931,8 +2103,8 @@ function endStack(reason){
       S.coins += SM.paid;
       msg = `<h3>${reason === 'collapse' ? '沒疊上去' : '沒有新樓層'}</h3><p>這次沒有蓋出樓層，已退回 ${SM.paid} 金。</p>`;
     } else {
-      if (dark() > .3) S.st.night = 1;
-      if (S.weather >= 3 && S.weather <= 4 && added >= 10) S.st.storm = 1;
+      if (dark() > .3) G.st.night = 1;
+      if (S.weather >= 3 && S.weather <= 4 && added >= 10) G.st.storm = 1;
       const r2 = v => Math.round(v*100)/100;
       const ws = SM.floors.map(f => r2(f.w/BASEW)), os = SM.floors.map(f => r2((f.l - BASEL)/BASEW)), ss = SM.floors.map(f => f.s || 'n').join('');
       const p = r2(ws.reduce((a,b) => a+b, 0)/ws.length);
@@ -2077,6 +2249,8 @@ function evtLabel(){
   return '';
 }
 function hud(){
+  $('#cityBtn').textContent = S.name + ' ▾';
+  $('#tpop').textContent = G.cities.length > 1 ? `（總 ${totalPop()}）` : '';
   $('#coins').textContent = Math.floor(S.coins);
   $('#inc').textContent = `+${ST.inc.toFixed(1)}/時`;
   $('#pop').textContent = ST.pop;
@@ -2093,6 +2267,7 @@ function hud(){
 
 /* ---------- keyboard ---------- */
 addEventListener('keydown', e => {
+  if (e.target.matches && e.target.matches('input, textarea')){ if (e.key === 'Escape') e.target.blur(); return; }
   if (SM){
     if (!SM.over && (e.code === 'Space' || e.code === 'Enter')){ e.preventDefault(); drop(); }
     else if (e.key === 'Escape'){ SM.over ? closeStack() : endStack('finish'); }
@@ -2113,7 +2288,7 @@ addEventListener('keydown', e => {
 });
 
 /* ---------- loop & boot ---------- */
-function resetWorld(){ walkers = []; cars = []; fw = []; ufo = null; camTouched = false; groundKey = ''; changed(); fit(); }
+function resetWorld(){ walkers = []; cars = []; fw = []; ufo = null; camTouched = false; groundKey = ''; roadsCache = null; lastQuestHtml = ''; changed(); fit(); }
 let last = performance.now(), hudAcc = 0;
 function frame(ts){
   const dt = Math.min(.05, (ts - last)/1000); last = ts; now = ts/1000;
@@ -2124,16 +2299,17 @@ function frame(ts){
   requestAnimationFrame(frame);
 }
 function start(data){
-  S = sanitize(data && data.S) || sanitize(loadLocal()) || newGame();
-  const fresh = !S.savedAt && !S.grid.some(t => t?.k === 'bld');
+  G = loadGlobal(data && data.G) || loadGlobal(loadLocal()) || newGlobal();
+  enterCity(G.cur);
+  const fresh = !G.savedAt;
   $('#musicBtn').textContent = `音樂 ${prefs.music ? '開' : '關'}`;
   compute(); resize(); hud();
-  if (S.savedAt){ const d = new Date(S.savedAt); $('#saved').textContent = `已存檔（本機）${pad(d.getHours())}:${pad(d.getMinutes())}`; }
+  if (G.savedAt){ const d = new Date(G.savedAt); $('#saved').textContent = `已存檔（本機）${pad(d.getHours())}:${pad(d.getMinutes())}`; }
   if (fresh) showHelp();
   requestAnimationFrame(t => { last = t; frame(t); });
   connectCloud();
 }
-try { window.claude?.hot?.snapshot?.(() => ({ S })); } catch {}
+try { window.claude?.hot?.snapshot?.(() => ({ G })); } catch {}
 window.claude?.hot?.ready ? window.claude.hot.ready(start) : start(window.claude?.hot?.data ?? {});
 })();
 </script>
