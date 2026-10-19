@@ -111,6 +111,19 @@ button:disabled{opacity:.45;cursor:not-allowed;filter:none}
 #sres .btnrow{justify-content:center}
 #sres .share{font-size:13px;color:var(--dim);user-select:all;background:var(--edge);padding:6px 8px;max-width:100%;overflow-wrap:anywhere}
 .shint{margin:0;color:var(--dim);font-size:13px;text-align:center;max-width:320px}
+#rate{position:fixed;inset:0;background:rgba(8,9,18,.82);display:flex;align-items:center;justify-content:center;padding-inline:16px;z-index:11}
+.rbox{background:var(--panel);padding:18px 20px;box-shadow:0 0 0 3px var(--gold),8px 8px 0 rgba(0,0,0,.5);display:flex;flex-direction:column;gap:10px;width:min(420px,100%);max-height:calc(100% - 32px);overflow:auto}
+.rbox h3{margin:0;font-weight:400;color:var(--gold);font-size:22px;text-align:center;text-wrap:balance}
+.rbox .sub{color:var(--dim);text-align:center;font-size:13px}
+.rrow{display:grid;grid-template-columns:5.5em auto 1fr;gap:4px 10px;align-items:baseline}
+.rrow small{color:var(--dim);font-size:12px;grid-column:3}
+.rstars{color:var(--gold);letter-spacing:2px;white-space:nowrap}
+.rstars i{font-style:normal;opacity:0;display:inline-block;animation:starpop .35s forwards;animation-delay:var(--d)}
+.rstars i.off{color:var(--panel2)}
+.rtotal{text-align:center;font-size:30px}
+.rtotal .rstars{letter-spacing:6px}
+@keyframes starpop{0%{opacity:0;transform:scale(2.2)}100%{opacity:1;transform:scale(1)}}
+@media (prefers-reduced-motion:reduce){.rstars i{animation:none;opacity:1}}
 @media (prefers-reduced-motion:reduce){#toast,#sflash{transition:none}}
 </style>
 
@@ -166,6 +179,8 @@ button:disabled{opacity:.45;cursor:not-allowed;filter:none}
     <p class="shint" id="shint">點畫面或按空白鍵放下樓層。對齊下面那層就是「完美」。</p>
   </div>
 </div>
+
+<div id="rate" hidden><div class="rbox" role="dialog" aria-labelledby="rateTitle"><div id="rateBody"></div><div class="btnrow" style="justify-content:center"><button type="button" id="rateClose">太好了</button></div></div></div>
 
 <script>
 (() => {
@@ -491,6 +506,7 @@ function dark(){
 }
 const SEASON_MSG = ['春天來了，櫻花開了！', '夏天到了，煙火節變多了。', '秋天了，樹葉轉紅。', '冬天來了，下雪天疊樓會滑，河面也結冰了。'];
 function newDay(){
+  if (dayNo() > 1 && (dayNo() - 1) % YEAR === 0) yearEnd();
   const d = dayNo(), sea = season(), r = Math.random();
   let w = r < .38 ? 0 : r < .6 ? 1 : r < .8 ? 2 : 3;
   if (sea === 3 && (w === 2 || Math.random() < .2)) w = 5;
@@ -532,6 +548,7 @@ function fireEvent(){
     });
     const msg = lost ? `地震！${hit} 棟歪樓共倒了 ${lost} 層。疊得越整齊越耐震。` : total ? '地震！所有建築都穩穩撐住了。' : '輕微地震，城裡沒有損失。';
     if (!lost && total >= 3) G.st.quakeSafe = 1;
+    yrAdd('lost', lost);
     toast(msg, true); addLog(msg); changed();
   } else if (e.k === 'typhoon'){
     mapShake = .8; beep(90,.6,'sawtooth',.05);
@@ -542,6 +559,7 @@ function fireEvent(){
       const n = Math.min(t.f - 1, 1 + Math.floor(Math.random()*3));
       cutFloors(t, n); lost += n; hit++;
     });
+    yrAdd('lost', lost);
     const msg = `颱風登陸！${hit ? `${hit} 棟高樓被吹掉 ${lost} 層` : '高樓都撐住了'}${trees ? `，吹倒 ${trees} 棵樹` : ''}。`;
     toast(msg, true); addLog(msg); changed();
   } else if (e.k === 'tour'){
@@ -601,7 +619,7 @@ function updUfo(dt){
 }
 function tick(dt){
   const before = S.min; S.min += dt * 6;
-  if (Math.floor(S.min/60) > Math.floor(before/60)) S.coins += ST.inc;
+  if (Math.floor(S.min/60) > Math.floor(before/60)){ S.coins += ST.inc; yrSample(); }
   if (Math.floor(S.min/1440) > Math.floor(before/1440)) newDay();
   if (S.evt && !S.evt.done && hourNow() >= S.evt.h) fireEvent();
   if (S.evt?.k === 'blackout' && S.evt.done && !S.evt.end && hourNow() >= 23){ S.evt.end = 1; toast('電力恢復了。'); compute(); }
@@ -643,6 +661,76 @@ function reqTick(){
 }
 function reqText(){ const R = S.req, t = get(R.x,R.y), nd = NEEDS.find(n => n.k === R.need); return `一棟 ${t.f} 層${bspec(t).name}的居民想要 ${nd.r} 格內有${nd.n}`; }
 
+/* ---------- yearly rating ---------- */
+const YEAR = 28;
+function yrInit(){ S.yr = { start:dayNo(), pop:ST.pop, hs:0, cs:0, n:0, lost:0, def:0, inv:0 }; }
+function yrSample(){ if (!S.yr) yrInit(); S.yr.hs += ST.happy; S.yr.cs += ST.cong; S.yr.n++; }
+function yrAdd(k, n){ if (!S.yr) yrInit(); S.yr[k] += n; }
+const band = (v, cuts, up = true) => { let s = 1; for (const c of cuts) if (up ? v >= c : v <= c) s++; return s; };
+function rateCity(){
+  const y = S.yr || { pop:0, hs:ST.happy, cs:ST.cong, n:1, lost:0, def:0, inv:0 };
+  const n = Math.max(1, y.n), avgH = y.hs/n, avgC = y.cs/n;
+  const blds = S.grid.filter(t => t?.k === 'bld');
+  const prec = blds.length ? blds.reduce((a,t) => a + (t.p || 0), 0)/blds.length : 0;
+  const kinds = new Set();
+  S.grid.forEach(t => {
+    if (!t) return;
+    if (t.k === 'bld'){ kinds.add('b' + t.t + (t.st || '')); if (t.roof) kinds.add('roof' + t.roof); }
+    else if (t.k === 'big') kinds.add(t.bk);
+    else if (t.k === 'lm') kinds.add('lm' + t.id);
+    else if (t.k === 'road'){ if (t.grand) kinds.add('grand'); }
+    else if (t.k !== 'tree') kinds.add(t.k);
+  });
+  const g = ST.pop/(y.pop + 20);
+  const parts = [
+    { n:'宜居', s:band(avgH, [50,60,70,80]), c:`平均幸福 ${Math.round(avgH)}%` },
+    { n:'成長', s:Math.max(band(g, [1.1,1.4,1.8,2.5]), ST.pop >= 1000 ? 3 : 1), c:`人口 ${y.pop} → ${ST.pop}` },
+    { n:'交通', s:band(avgC, [.5,.3,.15,.05], false), c:avgC < .05 ? '幾乎不塞車' : `平均擁擠度 ${Math.round(avgC*100)}%` },
+    { n:'建築品質', s:band(prec, [.6,.7,.8,.9]), c:`平均疊樓精準度 ${Math.round(prec*100)}%` },
+    { n:'多樣性', s:band(kinds.size, [3,5,8,11]), c:`${kinds.size} 種建築與設施` },
+    { n:'韌性', s:clamp(band(y.lost, [30,15,5,0], false) + (y.def ? 1 : 0) - (y.inv > y.def ? 1 : 0), 1, 5),
+      c:(y.lost ? `天災和入侵共損失 ${y.lost} 層` : '這一年沒有任何損失') + (y.inv ? ` · 擋下 ${y.def}/${y.inv} 次入侵` : '') },
+  ];
+  if (!blds.length) parts.forEach(p => { p.s = 1; });
+  const avg = parts.reduce((a,p) => a + p.s, 0)/parts.length;
+  return { parts, stars:Math.round(avg*2)/2 };
+}
+function starsHtml(n, d0){
+  let h = '';
+  for (let i=0; i<5; i++){ const full = i < Math.floor(n), half = !full && i < n; h += `<i class="${full || half ? '' : 'off'}" style="--d:${(d0 + i*.12).toFixed(2)}s">${half ? '☆' : '★'}</i>`; }
+  return h;
+}
+const RATE_MSG = [[5,'傳說級的城市，居民以這裡為榮！'],[4,'非常出色的城市。'],[3,'城市穩定成長中。'],[2,'還有很大的進步空間。'],[0,'居民有點失望……']];
+function yearEnd(){
+  const r = rateCity(), y = S.ratings.length + 1;
+  const coins = Math.round(r.stars*150*(1 + S.stage*.5)), tk = r.stars >= 5 ? 3 : r.stars >= 4 ? 2 : r.stars >= 3 ? 1 : 0;
+  S.coins += coins; G.tickets = (G.tickets || 0) + tk;
+  S.ratings.push({ y, d:dayNo(), stars:r.stars, parts:r.parts.map(p => p.s) }); if (S.ratings.length > 12) S.ratings.shift();
+  G.st.bestStars = Math.max(G.st.bestStars || 0, r.stars);
+  addLog(`第 ${y} 年城市評鑑：${r.stars} 顆星`);
+  yrInit(); markDirty(); scheduleSave();
+  let h = `<h3 id="rateTitle">${esc(S.name)} 第 ${y} 年城市評鑑</h3><p class="sub">第 ${S.stage + 1} 關 · ${THEMES[S.theme].n} · 人口 ${ST.pop}</p>`;
+  r.parts.forEach((p,i) => { h += `<div class="rrow"><span>${p.n}</span><span class="rstars">${starsHtml(p.s, .3 + i*.5)}</span><small>${p.c}</small></div>`; });
+  const t0 = .3 + r.parts.length*.5;
+  h += `<div class="rtotal"><span class="rstars">${starsHtml(r.stars, t0)}</span></div><p class="sub">${RATE_MSG.find(m => r.stars >= m[0])[1]}</p>
+    <p class="ok" style="text-align:center">獎勵 ${coins} 金${tk ? ` · 扭蛋券 ×${tk}` : ''}</p>`;
+  $('#rateBody').innerHTML = h; $('#rate').hidden = false;
+  if (prefs.sound){ r.parts.forEach((p,i) => setTimeout(() => beep(520 + p.s*80, .12, 'triangle', .04), (300 + i*500))); setTimeout(() => [523,659,784,1046].forEach((f,i) => setTimeout(() => beep(f,.2,'triangle',.05), i*120)), t0*1000); }
+  setTimeout(() => $('#rateClose').focus(), 50);
+}
+$('#rateClose').onclick = () => { $('#rate').hidden = true; };
+function showRatings(){
+  sel = null;
+  const left = YEAR - ((dayNo() - 1) % YEAR);
+  let h = `<h3>${esc(S.name)} 評鑑紀錄</h3><p class="dimtxt">每 ${YEAR} 天（一年）評鑑一次，下次在 ${left} 天後。</p>`;
+  if (!S.ratings.length) h += '<p class="dimtxt">還沒有評鑑紀錄。</p>';
+  const names = ['宜居','成長','交通','建築品質','多樣性','韌性'];
+  for (const r of S.ratings.slice().reverse()) h += `<div class="cityrow"><div><b>第 ${r.y} 年 <span class="stars">${starStr(r.stars)}</span></b><small>${r.parts.map((v,i) => `${names[i]} ${v}`).join(' · ')}</small></div></div>`;
+  const pv = rateCity();
+  h += `<p class="dimtxt">目前預估：${starStr(pv.stars)}（${pv.parts.map(p => `${p.n} ${p.s}`).join('、')}）</p>`;
+  panel(h);
+}
+
 /* ---------- quests & achievements ---------- */
 const popQ = n => ({ t:`人口達到 ${n}`, ok:() => ST.pop >= n, p:() => `${ST.pop}/${n}` });
 const QUESTS = [
@@ -663,6 +751,7 @@ const QUESTS = [
   { ...popQ(100), t:'人口達到 100，升級成小鎮', r:150 },
   { t:'達成第 1 關過關條件（人口 120、幸福 65%）', ok:() => G.cities[0].cleared, r:200 },
   { t:'點上方城市名稱，建立第二座城市', ok:() => G.cities.length >= 2, r:300 },
+  { t:'迎接第一次年度城市評鑑（每 28 天一次）', ok:() => G.cities.some(c => c.ratings.length), r:300 },
   { t:'疊出一棟 15 層公寓', ok:() => ST.maxF[1] >= 15, p:() => `${ST.maxF[1]}/15`, r:200 },
   { t:'蓋一座醫院或購物中心', ok:() => C('hospital') + C('mall') >= 1, r:250 },
   { t:'蓋一座神社', ok:() => C('shrine') >= 1, r:250 },
@@ -712,6 +801,8 @@ const ACH = [
   { id:'matsuri', n:'夏祭り',     d:'經歷一次神社祭典',                   ok:() => !!G.st.matsuri },
   { id:'hatsu',   n:'初詣',       d:'在神社迎接新年',                     ok:() => !!G.st.hatsumode },
   { id:'golden',  n:'金門',       d:'蓋一座跨河大橋',                     ok:() => ST.grand >= 1 },
+  { id:'star3',   n:'三星城市',   d:'年度評鑑拿到 3 顆星以上',            ok:() => (G.st.bestStars||0) >= 3 },
+  { id:'star5',   n:'米其林城市', d:'年度評鑑拿到 5 顆星',                ok:() => (G.st.bestStars||0) >= 5 },
   { id:'city3',   n:'開拓者',     d:'經營三座城市',                       ok:() => G.cities.length >= 3 },
   { id:'city6',   n:'城市聯盟',   d:'經營六座城市',                       ok:() => G.cities.length >= 6 },
   { id:'tp5000',  n:'傳奇市長',   d:'總人口達到 5000',                    ok:() => totalPop() >= 5000 },
@@ -1896,7 +1987,8 @@ function showCities(step, arg){
     <p class="dimtxt">第 ${S.stage + 1} 關 · ${THEMES[S.theme].n} · ${W}×${H} 格</p>
     ${row('過關條件', S.cleared ? '<span class="ok">已達成</span>' : `人口 ${ST.pop}/${req.pop} · 幸福 ${ST.happy}/${req.hap}%`)}
     ${S.cleared ? '' : `<div class="prog"><i style="width:${Math.round(Math.min(1, ST.pop/req.pop)*100)}%"></i></div>`}
-    <div class="btnrow"><button type="button" data-act="rename">改名</button>${latest.cleared ? '<button type="button" data-act="newcity">建立新城市</button>' : ''}</div>
+    ${row('年度評鑑', `${YEAR - ((dayNo() - 1) % YEAR)} 天後`)}
+    <div class="btnrow"><button type="button" data-act="rename">改名</button><button type="button" data-act="ratings">評鑑紀錄</button>${latest.cleared ? '<button type="button" data-act="newcity">建立新城市</button>' : ''}</div>
     ${row('總人口', `${tp}`)}${row('市長稱號', `${MILES[mi].n}${next ? `（下一級 ${next.pop}）` : ''}`)}
     <p class="dimtxt">所有城市</p>`;
   G.cities.forEach((c,i) => {
@@ -1925,6 +2017,7 @@ info.addEventListener('click', e => {
   if (a === 'cities') return showCities();
   if (a === 'newcity') return showCities('new');
   if (a === 'rename') return showCities('rename');
+  if (a === 'ratings') return showRatings();
   if (a === 'dorename'){ const v = ($('#cityName').value || '').trim().slice(0, 8); if (v){ S.name = v; addLog(`城市改名為${v}`); markDirty(); scheduleSave(); } return showCities(); }
   if (a === 'mkcity'){ const v = ($('#cityName').value || '').trim().slice(0, 8) || randomName(); const th = b.dataset.th; G.themeOpts = null; return createCity(th, v); }
   if (a === 'go'){ switchCity(+b.dataset.i); return; }
