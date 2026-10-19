@@ -173,6 +173,7 @@ button:disabled{opacity:.45;cursor:not-allowed;filter:none}
     <button class="tool" data-tool="landmark" type="button">地標<small>獨一無二</small></button>
     <button class="tool" data-tool="jp" type="button">和風<small>神社・鳥居</small></button>
     <button class="tool" data-tool="fun" type="button">娛樂<small>彩券・電玩</small></button>
+    <button class="tool" data-tool="def" type="button">防衛<small>防衛塔・軍隊</small></button>
     <button class="tool" data-tool="land" type="button">買地<small>擴張</small></button>
     <button class="tool" data-tool="bulldoze" type="button">拆除<small>免費</small></button>
   </nav>
@@ -216,7 +217,7 @@ const COST = { road:5, park:30, shop:60, school:120, factory:150 };
 const BRIDGE = 25;
 const UNLOCK = { school:20, factory:40 };
 const NAMES = { road:'道路', park:'公園', shop:'商店', school:'學校', factory:'工廠', hospital:'醫院', mall:'購物中心', stadium:'體育場',
-  torii:'鳥居', jgarden:'日式庭園', onsen:'溫泉', pagoda:'五重塔', shrine:'神社', arcade:'電玩遊樂場', lotto:'彩券行' };
+  torii:'鳥居', jgarden:'日式庭園', onsen:'溫泉', pagoda:'五重塔', shrine:'神社', arcade:'電玩遊樂場', lotto:'彩券行', turret:'防衛塔', aa:'防空砲', radar:'雷達站', barracks:'軍營', tankyard:'戰車廠', airbase:'空軍基地' };
 const LANDMARKS = [
   { name:'鐘塔',     cost:500,  unlock:100, tour:4,  desc:'全城幸福 +5，每小時觀光收入 +4' },
   { name:'摩天輪',   cost:1200, unlock:200, tour:10, desc:'全城幸福 +5，每小時觀光收入 +10' },
@@ -402,6 +403,7 @@ function enterCity(i){ G.cur = i; S = G.cities[i]; setDims(S.W, S.H); }
 const totalPop = () => G.cities.reduce((a,c) => a + (c === S ? ST.pop : (c.popCache || 0)), 0);
 const mileIdx = () => { const p = totalPop(); let k = 0; MILES.forEach((m,i) => { if (p >= m.pop) k = i; }); return k; };
 function switchCity(i){
+  if (BT){ toast('入侵中，不能離開城市！'); return; }
   if (i === G.cur || SM || !G.cities[i]) return;
   const prev = S; prev.lastMin = prev.min; prev.popCache = ST.pop; prev.incCache = ST.inc; prev.happyCache = ST.happy;
   const nowMin = prev.min, wth = prev.weather, wd = prev.windDir;
@@ -415,7 +417,7 @@ function switchCity(i){
   showBanner(S.name, `第 ${S.stage + 1} 關 · ${THEMES[S.theme].n}${off ? ` · 離開期間收入 +${off} 金` : ''}`);
 }
 function createCity(theme, name){
-  if (SM) return;
+  if (SM || BT) return;
   const latest = G.cities[G.cities.length - 1];
   if (!latest.cleared) return;
   const prev = S; prev.lastMin = prev.min; prev.popCache = ST.pop; prev.incCache = ST.inc; prev.happyCache = ST.happy;
@@ -561,12 +563,14 @@ function newDay(){
   else if (C('shrine') && (d - 1) % 28 === 0) evt = { k:'hatsumode', h:9 };
   else if (C('shrine') && sea === 1 && r2 < .3) evt = { k:'matsuri', h:18 };
   else if (d >= 5 && r2 < .07) evt = { k:'quake', h:hr(7) };
+  else if (d >= 6 && ST.pop >= 60 && r2 < .17) evt = { k:'invade', h:hr(10), type: ST.pop >= 200 && Math.random() < .3 ? 'kaiju' : Math.random() < .45 ? 'ufo' : 'robot' };
   else if (d >= 8 && r2 < .1) evt = { k:'ufo', h:21 };
   else if (ST.pop >= 20 && r2 < .16) evt = { k:'blackout', h:19 };
   else if (r2 < (sea === 1 ? .32 : .22)) evt = { k:'fireworks', h:20 };
   else if (r2 < .3 + (C('lm') ? .1 : 0)) evt = { k:'tour', h:hr(9) };
   else if (r2 < .5 && (C('shop') || C('mall'))) evt = { k:'market', h:8 };
   S.evt = evt;
+  if (evt?.k === 'invade') setTimeout(() => toast(C('radar') ? `雷達偵測到${FOES[evt.type].n}，預計 ${evt.h}:00 入侵！` : '警報：雷達訊號異常，今天可能有外來物種入侵！', true), 3500);
   if ((d - 1) % 7 === 0){ toast(SEASON_MSG[sea]); addLog(SEASON_MSG[sea]); }
   else if (w === 4){ toast('颱風警報！中午颱風登陸，疊得歪的高樓可能被吹壞。今天居民收入減半。', true); addLog('颱風警報發布'); }
   else {
@@ -616,6 +620,8 @@ function fireEvent(){
   } else if (e.k === 'fireworks'){
     G.st.fireworks = 1;
     const msg = `煙火節開始了！今天全城幸福 +10${C('stadium') ? '，體育場收入加倍' : ''}。`; toast(msg); addLog(msg); compute();
+  } else if (e.k === 'invade'){
+    startInvasion(e.type);
   } else if (e.k === 'matsuri'){
     G.st.matsuri = 1;
     const msg = '夏祭り開始了！街上掛滿燈籠，今天全城幸福 +10，神社觀光收入加倍。'; toast(msg); addLog(msg); compute();
@@ -790,11 +796,13 @@ const QUESTS = [
   { t:'一次疊樓連續 5 次完美', ok:() => (G.st.maxCombo||0) >= 5, p:() => `${G.st.maxCombo||0}/5`, r:100 },
   { t:'完成一次居民請求', ok:() => (G.st.req||0) >= 1, r:80 },
   { t:'蓋一座工廠（別太靠近住家）', ok:() => C('factory') >= 1, r:100 },
+  { t:'用「防衛」蓋一座防衛塔', ok:() => C('turret') >= 1, r:100 },
   { t:'人口 30 以上，幸福度達到 80%', ok:() => ST.pop >= 30 && ST.happy >= 80, p:() => `${ST.happy}%`, r:150 },
   { ...popQ(100), t:'人口達到 100，升級成小鎮', r:150 },
   { t:'達成第 1 關過關條件（人口 120、幸福 65%）', ok:() => G.cities[0].cleared, r:200 },
   { t:'點上方城市名稱，建立第二座城市', ok:() => G.cities.length >= 2, r:300 },
   { t:'在「選單」用扭蛋機抽一次外觀', ok:() => (G.st.pulls||0) >= 1, r:100 },
+  { t:'擊退一次外來入侵', ok:() => (G.st.wins||0) >= 1, r:300 },
   { t:'疊樓完工時試一次「加碼」', ok:() => (G.st.bets||0) >= 1, r:100 },
   { t:'迎接第一次年度城市評鑑（每 28 天一次）', ok:() => G.cities.some(c => c.ratings.length), r:300 },
   { t:'疊出一棟 15 層公寓', ok:() => ST.maxF[1] >= 15, p:() => `${ST.maxF[1]}/15`, r:200 },
@@ -853,6 +861,10 @@ const ACH = [
   { id:'betwin',   n:'賭神',       d:'加碼成功，3 層全部完美',             ok:() => !!G.st.betWin },
   { id:'ssr',      n:'歐皇',       d:'扭蛋抽到 SSR',                       ok:() => !!G.st.ssr },
   { id:'skins',    n:'收藏家',     d:'收集所有扭蛋外觀',                   ok:() => SKINS.every(k => G.skins[k.id]) },
+  { id:'defend',   n:'守護者',     d:'擊退一次外來入侵',                   ok:() => (G.st.wins||0) >= 1 },
+  { id:'perfdef',  n:'滴水不漏',   d:'擊退入侵且城市零損失',               ok:() => !!G.st.perfectDef },
+  { id:'kaiju',    n:'怪獸剋星',   d:'打倒巨大怪獸',                       ok:() => !!G.st.kaiju },
+  { id:'ally',     n:'同盟',       d:'請其他城市派兵支援',                 ok:() => !!G.st.ally },
   { id:'city3',   n:'開拓者',     d:'經營三座城市',                       ok:() => G.cities.length >= 3 },
   { id:'city6',   n:'城市聯盟',   d:'經營六座城市',                       ok:() => G.cities.length >= 6 },
   { id:'tp5000',  n:'傳奇市長',   d:'總人口達到 5000',                    ok:() => totalPop() >= 5000 },
@@ -879,13 +891,15 @@ function renderQuest(){
   let html = q
     ? `<div class="qc"><span class="k">任務 ${G.quest+1} / ${QUESTS.length}</span><span>${q.t}${q.p ? `（${q.p()}）` : ''}</span><span class="rw">獎勵 ${q.r} 金</span></div>`
     : `<div class="qc done"><span class="k">全部任務完成</span><span>你的城市由你決定，繼續自由建造吧！</span></div>`;
+  if (BT) html = `<div class="qc" style="box-shadow:0 0 0 2px var(--bad)"><span class="k">外來入侵 · 撐住 ${Math.max(0, Math.ceil(80 - BT.t))} 秒</span><span>${FOES[BT.type].n}：剩 ${BT.enemies.length} / ${BT.total}</span><span class="rw">我方部隊 ${BT.units.length} · 損失 ${BT.lost} 層</span><button type="button" data-act="support">請求支援</button></div>` + html;
+  else if (S.evt?.k === 'invade' && !S.evt.done) html = `<div class="qc" style="box-shadow:0 0 0 2px var(--bad)"><span class="k">入侵警報</span><span>${C('radar') ? `${FOES[S.evt.type].n}預計 ${S.evt.h}:00 入侵` : '今天可能有外來物種入侵'}</span><span class="rw">用「防衛」蓋防衛塔和軍隊</span></div>` + html;
   if (S.req && get(S.req.x,S.req.y)?.k === 'bld'){
     const left = Math.max(0, S.req.until - S.min), hrs = Math.ceil(left/60);
     html += `<div class="qc req"><span class="k">居民請求 · 剩 ${hrs >= 24 ? Math.ceil(hrs/24) + ' 天' : hrs + ' 小時'}</span><span>${reqText()}</span><span class="rw">獎勵 ${S.req.reward} 金</span><button type="button" data-act="goreq">看看是哪棟</button></div>`;
   }
   if (html !== lastQuestHtml){ $('#quest').innerHTML = html; lastQuestHtml = html; }
 }
-$('#quest').addEventListener('click', e => { if (e.target.closest('[data-act="goreq"]') && S.req){ panTo(S.req.x, S.req.y); sel = { x:S.req.x, y:S.req.y }; showInfo(S.req.x, S.req.y); } });
+$('#quest').addEventListener('click', e => { if (e.target.closest('[data-act="support"]')) return showSupport(); if (e.target.closest('[data-act="goreq"]') && S.req){ panTo(S.req.x, S.req.y); sel = { x:S.req.x, y:S.req.y }; showInfo(S.req.x, S.req.y); } });
 
 /* ---------- save ---------- */
 let dbBase = null, saving = false, saveWhere = '本機', saveTimer = 0, dirty = false, lastSavedCoins = -1;
@@ -969,11 +983,12 @@ const LEVEL_SONGS = [
 ];
 const NIGHT_SONG = { bpm:76,  chords:[[57,60,64],[53,57,60],[60,64,67],[55,59,62]], lead:.8, wave:'square', lv:.035, night:true };
 const STORM_SONG = { bpm:134, chords:[[57,60,64],[57,60,64],[53,57,60],[52,56,59]], lead:.55, wave:'square', lv:.04, storm:true };
+const BATTLE_SONG = { bpm:152, chords:[[57,60,64],[55,58,62],[53,57,60],[52,56,59]], lead:.45, wave:'square', lv:.045, storm:true };
 const MUS = { next:0, step:0, started:false };
 function musicTick(){
   if (!prefs.music || !AC || !MUS.started || AC.state !== 'running') return;
   if (MUS.next < AC.currentTime) MUS.next = AC.currentTime + .05;
-  const song = (S.weather === 4 || mapShake > 0) ? STORM_SONG : dark() > .3 ? NIGHT_SONG : LEVEL_SONGS[S.level || 0];
+  const song = BT ? BATTLE_SONG : (S.weather === 4 || mapShake > 0) ? STORM_SONG : dark() > .3 ? NIGHT_SONG : LEVEL_SONGS[S.level || 0];
   const e8 = 60/song.bpm/2, combo = SM && !SM.over ? SM.combo : 0;
   try {
     while (MUS.next < AC.currentTime + .25){
@@ -1622,8 +1637,9 @@ function renderWorld(dt){
     else if (t.k === 'jgarden') drawJGarden(x,y);
     else if (t.k === 'onsen') drawOnsen(x,y);
     else if (t.k === 'arcade') drawArcade(x,y);
+    else if (TOWER[t.k] || t.k === 'radar' || t.k === 'barracks') drawDef(x,y,t);
     else if (t.k === 'lotto') drawLotto(x,y);
-    else if (t.k === 'big' && x === t.ax+1 && y === t.ay+1){ if (t.bk === 'shrine') drawShrine(t.ax, t.ay); else drawBig(t.ax, t.ay, t.bk); }
+    else if (t.k === 'big' && x === t.ax+1 && y === t.ay+1){ if (t.bk === 'shrine') drawShrine(t.ax, t.ay); else if (t.bk === 'tankyard' || t.bk === 'airbase') drawDefBig(t.ax, t.ay, t.bk); else drawBig(t.ax, t.ay, t.bk); }
     else if (t.k === 'lm' || t.k === 'pagoda' || t.k === 'bld'){
       const hpx = objHeight(t), fade = hpx > T && occludes(x, y, hpx);
       const li = lights.length, gi = glows.length;
@@ -1661,6 +1677,7 @@ function renderWorld(dt){
   }
   if (!blackout() || !(d > .2)) for (const [x,y,w,h,col] of glows){ g.fillStyle = col; g.fillRect(x,y,w,h); }
   drawUfo();
+  drawBattle();
   for (const p of fw){ g.globalAlpha = Math.min(1, p.life); g.fillStyle = p.col; g.fillRect(p.x|0, p.y|0, 1, 1); }
   g.globalAlpha = 1;
   drawWeatherFx(dt);
@@ -1706,7 +1723,7 @@ function drawMap(){
 }
 
 /* ---------- tools & input ---------- */
-const TOOL_ORDER = ['look','build','road','park','shop','school','factory','big','landmark','jp','fun','land','bulldoze'];
+const TOOL_ORDER = ['look','build','road','park','shop','school','factory','big','landmark','jp','fun','def','land','bulldoze'];
 let tool = 'look';
 function setTool(t){
   tool = t; document.querySelectorAll('.tool').forEach(b => b.classList.toggle('on', b.dataset.tool === t));
@@ -1715,7 +1732,7 @@ function setTool(t){
   if ((t === 'land' || t === 'big') && (S.level || 0) < 1) return toast(`${t === 'land' ? '買地' : '大型建築'}在城市升級為「小鎮」（人口 100）時解鎖`);
   const tips = { build:'點一塊旁邊有道路的空地，開始疊房子', road:'按住拖曳可以連續鋪路；蓋在河上會變成橋（25 金）', park:'公園讓附近 3 格的住戶更幸福',
     shop:'商店讓附近 4 格的住戶更幸福，也會賺錢', school:'學校讓附近 5 格的住戶幸福 +10', factory:'工廠很會賺錢，但 2 格內的住戶會因為污染不開心',
-    big:'點一格當作 2×2 建築的左上角；點河上的橋可以升級成跨河大橋', landmark:'點一塊空地，選一座地標', jp:'點一塊空地，蓋鳥居、日式庭園、溫泉、五重塔或神社', fun:'點一塊空地，蓋彩券行或電玩遊樂場',
+    big:'點一格當作 2×2 建築的左上角；點河上的橋可以升級成跨河大橋', landmark:'點一塊空地，選一座地標', jp:'點一塊空地，蓋鳥居、日式庭園、溫泉、五重塔或神社', fun:'點一塊空地，蓋彩券行或電玩遊樂場', def:'點一塊空地，蓋防衛塔、防空砲、雷達或軍事設施',
     land:'點一塊亮起來的土地買下它', bulldoze:'點一下拆掉格子上的東西' };
   if (tips[t]) toast(tips[t]);
 }
@@ -1737,7 +1754,7 @@ function toolValid(x,y){
   if (tool === 'build') return buildable(x,y) && (!t || t.k === 'bld');
   if (tool === 'landmark') return buildable(x,y) && (!t || t.k === 'lm');
   if (tool === 'big') return canBig(x,y) || (t?.k === 'road' && terr(x,y) === 1 && !t.grand);
-  if (tool === 'jp' || tool === 'fun') return buildable(x,y) && !t;
+  if (tool === 'jp' || tool === 'fun' || tool === 'def') return buildable(x,y) && !t;
   if (tool === 'land') return !owned(x,y) && parcelAdj((x/PS)|0, (y/PS)|0);
   if (tool === 'bulldoze') return !!t && owned(x,y);
   return true;
@@ -1847,6 +1864,10 @@ function tapTile(x,y){
     if (terr(x,y) === 1) return toast('水上只能蓋道路（橋）');
     if (t) return t.k === 'big' || ['torii','jgarden','onsen','pagoda'].includes(t.k) ? (sel = {x,y}, showInfo(x,y)) : toast('這格已經有東西了，先用「拆除」清空');
     sel = {x,y}; showJpPicker(x,y);
+  } else if (tool === 'def'){
+    if (terr(x,y) === 1) return toast('水上只能蓋道路（橋）');
+    if (t) return TOWER[t.k] || t.k === 'radar' || t.k === 'barracks' || t.k === 'big' ? (sel = {x,y}, showInfo(x,y)) : toast('這格已經有東西了，先用「拆除」清空');
+    sel = {x,y}; showDefPicker(x,y);
   } else if (tool === 'fun'){
     if (terr(x,y) === 1) return toast('水上只能蓋道路（橋）');
     if (t) return t.k === 'arcade' || t.k === 'lotto' ? (sel = {x,y}, showInfo(x,y)) : toast('這格已經有東西了，先用「拆除」清空');
@@ -1880,6 +1901,7 @@ function showInfo(x,y){
   if (t.k === 'road' && t.grand) return panel(`<h3>跨河大橋</h3><p>紅色的懸索大橋，城市的新地標。</p>${row('觀光收入', `每格 +1.5 金/時`)}<p class="dimtxt">全城幸福 +3，大橋的每一格也讓道路容量增加，減少塞車。</p>`);
   if (t.k === 'arcade') return panel(`<h3>電玩遊樂場</h3>${yes(e?.road,'有接道路','沒接道路，沒有客人')}<p>3 格內的住戶幸福 +8。</p>${row('客人', `${e?.customers||0} 人`)}${row('收入', `+${(e?.inc||0).toFixed(1)} 金/時`)}`);
   if (t.k === 'lotto') return panel(lottoInfo());
+  if (TOWER[t.k] || t.k === 'radar' || t.k === 'barracks' || (t.k === 'big' && (t.bk === 'tankyard' || t.bk === 'airbase'))){ const D = DEFS.find(q => q.k === (t.k === 'big' ? t.bk : t.k)); return panel(`<h3>${D.n}</h3><p>${D.d}。</p><p class="dimtxt">入侵在第 6 天之後、人口 60 以上才會發生。蓋了雷達站可以提早知道入侵的時間和種類。</p>`); }
   if (t.k === 'torii') return panel(`<h3>鳥居</h3><p>3 格內的住戶幸福 +5。</p><div class="btnrow"><button type="button" data-act="kujiopen">抽御神籤</button></div><p class="dimtxt">和風系列：鳥居、日式庭園、溫泉、五重塔、神社。</p>`);
   if (t.k === 'jgarden') return panel(`<h3>日式庭園</h3><p>算是公園：3 格內的住戶幸福 +${policy() === 'green' ? 25 : 15}。楓樹會隨季節變色。</p>`);
   if (t.k === 'onsen') return panel(`<h3>溫泉</h3><p>3 格內的住戶幸福 +10。</p>${row('觀光收入', `+${(e?.inc||0).toFixed(1)} 金/時`)}<p class="dimtxt">冬天泡溫泉的人變兩倍。</p>`);
@@ -2007,18 +2029,16 @@ function showLogs(){
 }
 function showHelp(){
   panel(`<h3>怎麼玩</h3>
-    <p>1. 用「蓋樓」點道路旁的空地，選房型後進入疊樓。</p>
-    <p>2. 樓層會左右移動，點一下放下。對準就是「完美」，連續 3 次完美樓層會變寬。金色樓層對準有大獎勵；深色的重樓層比較難對，但住的人多一倍。</p>
-    <p>3. 最後一層完美收尾，可以幫公寓和大樓裝上屋頂花園、停機坪或霓虹招牌。</p>
-    <p>4. 公園、商店、學校、醫院讓居民更幸福；靠水和山丘的房子也比較搶手。工廠很賺錢但有污染。</p>
-    <p>5. 房子有日式、英式、台式等造型。蓋公寓時周圍 8 格要有小房子，蓋大樓時周圍要有 2 棟公寓，城市才會由低到高自然長大。</p>
-    <p>6. 「和風」可以蓋鳥居、日式庭園、溫泉、五重塔和神社；有神社的話，夏天會辦夏祭り。河上的橋可以用「大型」改建成跨河大橋。</p>
-    <p>7. 高樓擋住後面時，把滑鼠移到後面的格子，或點右下角「透」開啟透視模式。</p>
-    <p>8. 人口多了路上會塞車，多鋪路、做出環狀道路。河上可以蓋橋。</p>
-    <p>9. 城市會從村莊升級成小鎮、城市、大都會，每一級音樂都不一樣。小鎮之後可以買地擴張。</p>
-    <p>10. 四季輪替（每季 7 天），還會有地震、颱風、停電、煙火節、外星人和市長選舉。</p>
-    <p>11. 右上角「每日挑戰」每天一題，所有玩家題目都一樣，可以跟朋友比分數。</p>
-    <p class="dimtxt">電腦：滾輪縮放、拖曳移動、方向鍵平移、數字鍵切換工具、X 切換透視、空白鍵放下樓層。手機：雙指縮放。</p>`);
+    <p>1. 用「蓋樓」點道路旁的空地，選房型後進入疊樓。樓層會左右移動，點一下放下，對準就是「完美」。</p>
+    <p>2. 金色樓層對準有大獎勵；深色的重樓層比較難對，但住的人多一倍。完美收尾可以裝屋頂，完工後還能「加碼」再疊 3 層。</p>
+    <p>3. 疊越高住越多人，疊得越整齊居民越幸福、也越耐震。公寓周圍要有小房子，大樓周圍要有 2 棟公寓。</p>
+    <p>4. 公園、商店、學校、醫院、和風建築讓居民更幸福；靠水和山丘的房子比較搶手；工廠很賺但有污染。</p>
+    <p>5. 從 16×12 的小地圖開始。達成左上角城市面板的過關條件（人口和幸福度），就能建立下一座更大的城市，每座城市地形不同。</p>
+    <p>6. 每座城市金幣分開，可以互送物資。總人口越多，市長稱號越高。每 28 天會有年度城市評鑑，最高 5 顆星。</p>
+    <p>7. 有鳥居或神社可以每天抽御神籤；彩券行每週開獎；扭蛋機可以抽稀有房屋外觀。</p>
+    <p>8. 第 6 天之後可能有機器人、外星人或巨大怪獸入侵。用「防衛」蓋防衛塔、防空砲、雷達和軍隊，也可以請其他城市派兵支援。</p>
+    <p>9. 四季輪替，會有地震、颱風、停電、煙火節、祭典、選舉等事件。高樓擋住時點右下角「透」。</p>
+    <p class="dimtxt">電腦：滾輪縮放、拖曳移動、方向鍵平移、數字鍵切換工具、X 透視、空白鍵放下樓層。手機：雙指縮放。</p>`);
 }
 function todayStr(){ const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`; }
 function todayChallenge(){
@@ -2171,6 +2191,8 @@ info.addEventListener('click', e => {
   if (a === 'new') return showMenu('new');
   if (a === 'newgo'){ newGlobal(); enterCity(0); resetWorld(); G.cities.forEach(c => dirtyCities.add(c.id)); saveNow(); showHelp(); return; }
   if (a === 'policy'){ const k = b.dataset.p; S.policy = { k, until:S.min + 10*1440 }; addLog(`施政方針：${POLICIES[k].n}`); toast(`接下來 10 天：${POLICIES[k].n}`); hidePanel(); changed(); return; }
+  if (a === 'support') return showSupport();
+  if (a === 'sup'){ sendSupport(+b.dataset.id); return; }
   if (a === 'kujiopen') return showOmikuji();
   if (a === 'kuji') return drawKuji();
   if (a === 'gacha') return showGacha();
@@ -2225,6 +2247,14 @@ info.addEventListener('click', e => {
     const needRoad = J.k === 'onsen' || J.big;
     toast(needRoad && !(J.big ? bigRoad(x,y) : roadAdj(x,y)) ? `${J.n}要接道路才有遊客` : `${J.n}落成！`);
     beep(784,.12,'triangle'); setTimeout(() => beep(1046,.2,'sine',.04), 140);
+  } else if (a === 'defb'){
+    const D = DEFS.find(q => q.k === b.dataset.k);
+    if (t || ST.pop < D.pop || (D.big && !canBig(x,y))) return;
+    if (S.coins < D.cost) return toast('金幣不足');
+    S.coins -= D.cost;
+    if (D.big) for (let dy=0; dy<2; dy++) for (let dx=0; dx<2; dx++) S.grid[idx(x+dx,y+dy)] = { k:'big', bk:D.k, ax:x, ay:y };
+    else S.grid[idx(x,y)] = { k:D.k };
+    hidePanel(); changed(); addLog(`${D.n}完工`); toast(`${D.n}完工！`); beep(440,.12,'square',.03);
   } else if (a === 'funb'){
     const F = FUN.find(q => q.k === b.dataset.k);
     if (t || ST.pop < F.pop) return;
@@ -2295,6 +2325,7 @@ const SW = 160, SH = 240, BASEW = 64, BASEL = (SW - BASEW)/2, GROUND = SH - 24;
 let SM = null;
 function env(){ return SM?.ch ? { weather:SM.ch.w, wind:WEATHER[SM.ch.w].w, windDir:SM.ch.dir } : { weather:S.weather, wind:S.wind, windDir:S.windDir }; }
 function startStack(x, y, ti, existing, paid, ch, st){
+  if (BT){ S.coins += paid || 0; toast('入侵中，先保衛城市再蓋樓！'); return; }
   const floors = existing ? existing.w.map((w,i) => ({ l: BASEL + existing.o[i]*BASEW, w: w*BASEW, s:(existing.s || '')[i] || 'n' })) : [];
   SM = { x, y, t:ti, st:st || '', ch:ch || null, floors, start:floors.length, cur:null, combo:0, maxCombo:0, perfects:0, golds:0, debris:[], parts:[], over:false, earned:0, camY:0, paid, shake:0, lastPerfect:false, roof:existing?.roof || '' };
   SM.spec = bspec({ t:ti, st:SM.st });
@@ -2543,6 +2574,271 @@ function renderStack(){
   c.setTransform(1,0,0,1,0,0);
 }
 
+/* ---------- invasion & defense ---------- */
+const DEFS = [
+  { k:'turret',   n:'防衛塔',   cost:150,  pop:40,  d:'射程 4 格，打地面和空中的敵人' },
+  { k:'aa',       n:'防空砲',   cost:200,  pop:60,  d:'射程 5 格，專打空中的 UFO，火力很強' },
+  { k:'radar',    n:'雷達站',   cost:120,  pop:40,  d:'提早知道入侵的時間和種類；6 格內防衛塔火力 +25%' },
+  { k:'barracks', n:'軍營',     cost:250,  pop:60,  d:'入侵時派出 3 名士兵，也能支援其他城市' },
+  { k:'tankyard', n:'戰車廠',   cost:800,  pop:150, d:'佔 2×2。入侵時派出 2 輛戰車，也能支援其他城市', big:true },
+  { k:'airbase',  n:'空軍基地', cost:1000, pop:200, d:'佔 2×2。入侵時派出 2 架戰機，也能支援其他城市', big:true },
+];
+const TOWER = { turret:{ r:4, dps:10, air:true, ground:true, col:'#ffe27a' }, aa:{ r:5, dps:14, air:true, ground:false, col:'#7fe8ff' } };
+const FOES = {
+  robot: { n:'機器人軍團', hp:30,  sp:.9,  air:false, dmg:1, rate:2.4, unitDps:3 },
+  ufo:   { n:'外星人艦隊', hp:45,  sp:1.6, air:true,  dmg:1, rate:2.8, unitDps:0 },
+  kaiju: { n:'巨大怪獸',   hp:450, sp:.32, air:false, dmg:2, rate:3.2, unitDps:8 },
+};
+const UNITS = {
+  soldier: { hp:30, sp:1.0, r:1.3, dps:3.5, air:true,  ground:true },
+  tank:    { hp:110, sp:1.1, r:2.2, dps:9,   air:false, ground:true },
+  jet:     { hp:40, sp:4.2, r:2.4, dps:12,  air:true,  ground:true, fly:true },
+};
+const UNIT_N = { soldier:'士兵', tank:'戰車', jet:'戰機' };
+let BT = null;
+function forcesOf(c){
+  const f = { soldier:0, tank:0, jet:0 };
+  c.grid.forEach((t,i) => { if (!t) return; if (t.k === 'barracks') f.soldier += 3; else if (t.k === 'big' && i === t.ay*c.W + t.ax){ if (t.bk === 'tankyard') f.tank += 2; if (t.bk === 'airbase') f.jet += 2; } });
+  return f;
+}
+function edgeSpawn(water){
+  if (water){
+    const cand = [];
+    for (let x=0; x<W; x++) for (const y of [0, H-1]) if (S.terr[idx(x,y)] === 1) cand.push([x + .5, y + .5]);
+    for (let y=0; y<H; y++) for (const x of [0, W-1]) if (S.terr[idx(x,y)] === 1) cand.push([x + .5, y + .5]);
+    if (cand.length) return cand[Math.floor(Math.random()*cand.length)];
+  }
+  const side = Math.floor(Math.random()*4);
+  return side === 0 ? [.2, Math.random()*H] : side === 1 ? [W - .2, Math.random()*H] : side === 2 ? [Math.random()*W, .2] : [Math.random()*W, H - .2];
+}
+function addUnit(kind, x, y, ally){ const U = UNITS[kind]; BT.units.push({ kind, x, y, hp:U.hp, max:U.hp, cd:Math.random()*.5, ally:!!ally, ang:Math.random()*6, aim:0 }); }
+function addFoe(type, x, y, mul){ const F = FOES[type], hp = F.hp*(1 + S.stage*.3)*mul; BT.enemies.push({ type, x, y, hp, max:hp, cd:F.rate, tgt:null, wob:Math.random()*6 }); }
+function startInvasion(type){
+  if (BT) return;
+  if (SM && !SM.over) endStack('finish');
+  const n = type === 'kaiju' ? 1 : type === 'ufo' ? clamp(2 + Math.floor(ST.pop/150), 2, 6) : clamp(4 + Math.floor(ST.pop/60), 4, 14);
+  const floors = S.grid.reduce((a,t) => a + (t?.k === 'bld' ? t.f - 1 : 0), 0);
+  BT = { type, t:0, enemies:[], units:[], shots:[], booms:[], lost:0, total:0, cool:{}, arrivals:[], cap:Math.max(6, Math.round(floors*.25)) };
+  for (let i=0; i<n; i++){ const [x,y] = edgeSpawn(type === 'kaiju'); addFoe(type, x, y, type === 'kaiju' ? 1 + ST.pop/800 : 1); }
+  if (type === 'kaiju') for (let i=0; i<3; i++){ const [x,y] = edgeSpawn(false); addFoe('robot', x, y, 1); }
+  BT.total = BT.enemies.length;
+  S.grid.forEach((t,i) => {
+    if (!t) return; const x = i%W, y = (i/W)|0;
+    if (t.k === 'barracks') for (let k=0; k<3; k++) addUnit('soldier', x + .5, y + .5);
+    else if (t.k === 'big' && x === t.ax && y === t.ay){
+      if (t.bk === 'tankyard') for (let k=0; k<2; k++) addUnit('tank', x + 1, y + 1);
+      if (t.bk === 'airbase') for (let k=0; k<2; k++) addUnit('jet', x + 1, y + 1);
+    }
+  });
+  for (let k=0; k<2; k++) addUnit('soldier', W/2, (H>>1) + .5);
+  yrAdd('inv', 1); mapShake = type === 'kaiju' ? 1.5 : .4; hidePanel();
+  showBanner(`${FOES[type].n}入侵！`, type === 'kaiju' ? '巨大怪獸登陸了！點左上角可以請求其他城市支援。' : '保護城市！點左上角可以請求其他城市支援。');
+  beep(220,.4,'sawtooth',.06); setTimeout(() => beep(196,.5,'sawtooth',.06), 400);
+  addLog(`${FOES[type].n}入侵`);
+}
+function nearestBld(x,y){
+  let best = null, bd = 1e9;
+  S.grid.forEach((t,i) => { if (t?.k !== 'bld' || t.f < 2) return; const d = Math.hypot(i%W + .5 - x, ((i/W)|0) + .5 - y); if (d < bd){ bd = d; best = i; } });
+  return best;
+}
+function nearestFoe(x,y,r,air,ground){
+  let best = null, bd = r;
+  for (const e of BT.enemies){ const a = FOES[e.type].air; if ((a && !air) || (!a && !ground)) continue; const d = Math.hypot(e.x-x, e.y-y); if (d <= bd){ bd = d; best = e; } }
+  return best;
+}
+function boom(x,y,col,n){ for (let i=0; i<n; i++){ const a = Math.random()*Math.PI*2, sp = .5 + Math.random()*2; BT.booms.push({ x, y, vx:Math.cos(a)*sp, vy:Math.sin(a)*sp - 1, life:.5 + Math.random()*.5, col }); } }
+const foeLift = e => FOES[e.type].air ? 1 : e.type === 'kaiju' ? 1.2 : .4;
+function updBattle(dt){
+  if (!BT) return;
+  BT.t += dt;
+  BT.arrivals = BT.arrivals.filter(a => {
+    a.t -= dt; if (a.t > 0) return true;
+    for (let k=0; k<a.n; k++) addUnit(a.kind, a.x + Math.random() - .5, a.y + Math.random() - .5, true);
+    toast(`${a.from}的${a.n} ${UNIT_N[a.kind]}抵達了！`); beep(660,.1,'triangle'); return false;
+  });
+  for (const e of BT.enemies){
+    const F = FOES[e.type];
+    if (e.tgt === null || S.grid[e.tgt]?.k !== 'bld' || S.grid[e.tgt].f < 2) e.tgt = nearestBld(e.x, e.y);
+    const tx = e.tgt !== null ? e.tgt%W + .5 : W/2, ty = e.tgt !== null ? ((e.tgt/W)|0) + .5 : H/2;
+    const d = Math.hypot(tx - e.x, ty - e.y);
+    if (d > .55){ const st = Math.min(d, F.sp*dt); e.x += (tx - e.x)/d*st; e.y += (ty - e.y)/d*st; }
+    else if (e.tgt !== null){
+      e.cd -= dt;
+      if (e.cd <= 0){
+        e.cd = F.rate; const t = S.grid[e.tgt], n = Math.min(F.dmg, t.f - 1, BT.cap - BT.lost);
+        if (n > 0){ cutFloors(t, n); BT.lost += n; boom(tx, ty - .5, e.type === 'ufo' ? '#7cf07a' : '#ff8a3a', 8); if (e.type === 'kaiju'){ mapShake = .4; beep(70,.3,'sawtooth',.06); } else beep(140,.06,'square',.02); }
+      }
+    }
+    if (F.unitDps) for (const u of BT.units){ if (UNITS[u.kind].fly) continue; if (Math.hypot(u.x - e.x, u.y - e.y) < (e.type === 'kaiju' ? 1.5 : .8)) u.hp -= F.unitDps*dt; }
+  }
+  S.grid.forEach((t,i) => {
+    const TW = t && TOWER[t.k]; if (!TW) return;
+    const x = i%W + .5, y = ((i/W)|0) + .5;
+    BT.cool[i] = (BT.cool[i] || 0) - dt; if (BT.cool[i] > 0) return;
+    const tg = nearestFoe(x, y, TW.r, TW.air, TW.ground); if (!tg) return;
+    const boost = near(i%W, (i/W)|0, 6, 'radar') ? 1.25 : 1;
+    BT.cool[i] = .4; tg.hp -= TW.dps*.4*boost; t.aim = Math.atan2(tg.y - y, tg.x - x);
+    BT.shots.push({ x0:x, y0:y - .5, x1:tg.x, y1:tg.y - foeLift(tg), col:TW.col, life:.08 });
+  });
+  for (const u of BT.units){
+    const U = UNITS[u.kind], tg = nearestFoe(u.x, u.y, 99, U.air, U.ground); if (!tg) continue;
+    const d = Math.hypot(tg.x - u.x, tg.y - u.y);
+    if (U.fly){ u.ang += dt*2.2; const ox = tg.x + Math.cos(u.ang)*1.6, oy = tg.y + Math.sin(u.ang)*1.2, dd = Math.hypot(ox - u.x, oy - u.y); if (dd > .05){ const st = Math.min(dd, U.sp*dt); u.x += (ox - u.x)/dd*st; u.y += (oy - u.y)/dd*st; } }
+    else if (d > U.r*.8){ const st = Math.min(d - U.r*.7, U.sp*dt); u.x += (tg.x - u.x)/d*st; u.y += (tg.y - u.y)/d*st; }
+    u.cd -= dt;
+    if (d <= U.r && u.cd <= 0){
+      u.cd = .5; tg.hp -= U.dps*.5; u.aim = Math.atan2(tg.y - u.y, tg.x - u.x);
+      BT.shots.push({ x0:u.x, y0:u.y - (U.fly ? 1 : .2), x1:tg.x, y1:tg.y - foeLift(tg), col:u.kind === 'tank' ? '#ffb347' : '#fff3b0', life:.07 });
+    }
+  }
+  BT.units = BT.units.filter(u => { if (u.hp > 0) return true; boom(u.x, u.y, '#ff5a3a', 6); return false; });
+  BT.enemies = BT.enemies.filter(e => {
+    if (e.hp > 0) return true;
+    boom(e.x, e.y - foeLift(e), e.type === 'ufo' ? '#7cf07a' : '#ffb347', e.type === 'kaiju' ? 70 : 16);
+    if (e.type === 'kaiju'){ mapShake = 1.2; G.st.kaiju = 1; beep(90,.6,'sawtooth',.06); } else beep(180,.12,'square',.03);
+    return false;
+  });
+  for (const q of BT.shots) q.life -= dt;
+  BT.shots = BT.shots.filter(q => q.life > 0);
+  for (const q of BT.booms){ q.x += q.vx*dt; q.y += q.vy*dt; q.vy += 3*dt; q.life -= dt; }
+  BT.booms = BT.booms.filter(q => q.life > 0);
+  if (!BT.enemies.length) endBattle(true);
+  else if (BT.t > 80) endBattle(false);
+}
+function endBattle(win){
+  const b = BT; BT = null;
+  yrAdd('lost', b.lost);
+  const nm = FOES[b.type].n;
+  if (win){
+    const reward = Math.round((80 + b.total*25)*(1 + S.stage*.3)*(b.type === 'kaiju' ? 3 : 1));
+    S.coins += reward; yrAdd('def', 1); G.st.wins = (G.st.wins || 0) + 1; if (!b.lost) G.st.perfectDef = 1;
+    showBanner('擊退入侵！', `${nm}被消滅了。獎勵 ${reward} 金${b.lost ? `，城市損失 ${b.lost} 層` : '，城市毫髮無傷'}`);
+    [523,659,784,1046].forEach((f,i) => setTimeout(() => beep(f,.2,'triangle',.05), i*120));
+    addLog(`擊退${nm}（+${reward} 金，損失 ${b.lost} 層）`);
+  } else {
+    showBanner('敵人撤退了', `${nm}帶著戰利品離開，城市損失 ${b.lost} 層。多蓋一些防衛設施吧。`);
+    addLog(`${nm}撤退，城市損失 ${b.lost} 層`);
+  }
+  changed(); scheduleSave();
+}
+function showSupport(){
+  sel = null;
+  if (!BT) return panel('<h3>請求支援</h3><p>現在沒有入侵。</p>');
+  let h = '<h3>請求其他城市支援</h3><p class="dimtxt">部隊來自那座城市的軍營、戰車廠和空軍基地。派過兵的城市要休息 2 天。</p>';
+  const others = G.cities.filter(c => c !== S);
+  if (!others.length) h += '<p>你只有一座城市。建立更多城市後就能互相支援。</p>';
+  for (const c of others){
+    const f = forcesOf(c), any = f.soldier + f.tank + f.jet, cd = (c.supportUntil || 0) > S.min;
+    h += `<div class="cityrow"><div><b>${esc(c.name)}</b><small>士兵 ${f.soldier} · 戰車 ${f.tank} · 戰機 ${f.jet}${cd ? ' · 休息中' : !any ? ' · 沒有部隊' : ''}</small></div><div class="btnrow"><button type="button" data-act="sup" data-id="${c.id}" ${!any || cd ? 'disabled' : ''}>派兵</button></div></div>`;
+  }
+  panel(h);
+}
+function sendSupport(id){
+  const c = G.cities.find(q => q.id === id);
+  if (!c || !BT || (c.supportUntil || 0) > S.min) return;
+  const f = forcesOf(c); c.supportUntil = S.min + 2*1440; dirtyCities.add(c.id);
+  const [x,y] = edgeSpawn(false);
+  for (const kind of ['soldier','tank','jet']) if (f[kind]) BT.arrivals.push({ kind, n:f[kind], x:clamp(x, .5, W - .5), y:clamp(y, .5, H - .5), t:kind === 'jet' ? 2 : 4, from:c.name });
+  G.st.ally = 1; toast(`${c.name}派出部隊，馬上就到！`); addLog(`${c.name}派兵支援`); c.log.push({ d:dayNo(), m:`派兵支援${S.name}` }); hidePanel();
+}
+const wx = x => Math.round(x*T), wyy = y => Math.round(M + y*T);
+function lineW(x0,y0,x1,y1,col){ const n = Math.max(1, Math.ceil(Math.max(Math.abs(x1-x0), Math.abs(y1-y0)))); g.fillStyle = col; for (let i=0; i<=n; i++) g.fillRect(Math.round(x0 + (x1-x0)*i/n), Math.round(y0 + (y1-y0)*i/n), 1, 1); }
+function drawKaiju(x, y, step){
+  const b = '#3f7a4a', d = '#2c5a35', glow = Math.floor(now*4) % 2 ? '#7cf0ff' : '#4ac8e0';
+  g.fillStyle = 'rgba(0,0,0,.3)'; g.fillRect(x-10, y-1, 22, 3);
+  g.fillStyle = d; g.fillRect(x+6, y-8, 8, 4); g.fillRect(x+12, y-6, 4, 3);
+  g.fillStyle = b; g.fillRect(x-6, y-22, 13, 18);
+  g.fillStyle = '#a8c48a'; g.fillRect(x-4, y-18, 6, 12);
+  g.fillStyle = b; g.fillRect(x-9, y-30, 10, 9);
+  g.fillStyle = d; g.fillRect(x-11, y-26, 4, 3);
+  g.fillStyle = '#ff3a3a'; g.fillRect(x-7, y-28, 2, 1);
+  g.fillStyle = '#f4f1ea'; g.fillRect(x-11, y-24, 3, 1);
+  g.fillStyle = glow; for (let k=0; k<5; k++) g.fillRect(x + 3 + (k%2), y - 29 + k*4, 3, 2);
+  g.fillStyle = d; g.fillRect(x-8, y-17, 3, 2);
+  g.fillRect(x - 5 + (step ? 1 : 0), y-4, 4, 4); g.fillRect(x + 2 - (step ? 1 : 0), y-4, 4, 4);
+}
+function drawBattle(){
+  if (!BT) return;
+  const step = Math.floor(now*6) % 2;
+  for (const u of BT.units){
+    const x = wx(u.x), y = wyy(u.y), fly = UNITS[u.kind].fly;
+    if (u.kind === 'soldier'){ g.fillStyle = u.ally ? '#4a7ab0' : '#4a6b3a'; g.fillRect(x-1, y-3, 2, 3); g.fillStyle = '#2f3a2a'; g.fillRect(x-1, y-4, 2, 1); g.fillStyle = '#1a1a1a'; g.fillRect(x - 1 + step, y, 1, 1); }
+    else if (u.kind === 'tank'){ g.fillStyle = u.ally ? '#4a6a8a' : '#5a6b3a'; g.fillRect(x-3, y-2, 7, 4); g.fillStyle = '#2f3a2a'; g.fillRect(x-3, y+1, 7, 1); g.fillStyle = u.ally ? '#6a8aaa' : '#7a8b5a'; g.fillRect(x-1, y-3, 3, 2); lineW(x, y-2, x + Math.cos(u.aim)*5, y - 2 + Math.sin(u.aim)*5, '#2f3a2a'); }
+    else { const yy = y - 14; g.fillStyle = 'rgba(0,0,0,.25)'; g.fillRect(x-2, y, 5, 1); g.fillStyle = u.ally ? '#bcd6ff' : '#c9ccd2'; g.fillRect(x-2, yy-1, 5, 2); g.fillRect(x, yy-3, 1, 6); g.fillStyle = '#ff8a3a'; g.fillRect(x - 3, yy, 1, 1); }
+    if (u.hp < u.max){ const by = y - 7 - (fly ? 12 : 0); g.fillStyle = '#300'; g.fillRect(x-3, by, 6, 1); g.fillStyle = '#7cf07a'; g.fillRect(x-3, by, Math.max(1, Math.round(6*u.hp/u.max)), 1); }
+  }
+  for (const e of BT.enemies){
+    const x = wx(e.x), y = wyy(e.y), bob = Math.round(Math.sin(now*6 + e.wob));
+    if (e.type === 'robot'){
+      g.fillStyle = '#9aa0ad'; g.fillRect(x-2, y-6, 4, 4); g.fillStyle = '#c9ccd2'; g.fillRect(x-2, y-9, 4, 3);
+      g.fillStyle = '#ff3a3a'; g.fillRect(x-1, y-8, 2, 1); g.fillStyle = '#5c6380'; g.fillRect(x - 2 + step, y-2, 1, 2); g.fillRect(x + 1 - step, y-2, 1, 2);
+      g.fillStyle = '#7cf0ff'; g.fillRect(x, y-11, 1, 2);
+    } else if (e.type === 'ufo'){
+      const yy = y - 16 + bob;
+      if (e.tgt !== null && Math.hypot(e.tgt%W + .5 - e.x, ((e.tgt/W)|0) + .5 - e.y) < .6) for (let k=0; k<14; k++){ g.fillStyle = 'rgba(124,240,122,.22)'; g.fillRect(x - 1 - Math.floor(k/4), yy + 2 + k, 3 + Math.floor(k/2), 1); }
+      g.fillStyle = 'rgba(0,0,0,.25)'; g.fillRect(x-4, y, 9, 1);
+      g.fillStyle = '#9aa0b5'; g.fillRect(x-5, yy, 11, 2); g.fillStyle = '#6d7385'; g.fillRect(x-6, yy+1, 13, 1);
+      g.fillStyle = '#7cf07a'; g.fillRect(x-2, yy-2, 5, 2);
+      g.fillStyle = step ? '#fff36a' : '#ff5ab4'; g.fillRect(x-4, yy+1, 1, 1); g.fillRect(x+4, yy+1, 1, 1);
+    } else drawKaiju(x, y, step);
+    const big = e.type === 'kaiju', bw = big ? 24 : 8, by = y - (big ? 36 : e.type === 'ufo' ? 21 : 14);
+    g.fillStyle = '#300'; g.fillRect(x - (bw>>1), by, bw, big ? 2 : 1);
+    g.fillStyle = '#ff4a3a'; g.fillRect(x - (bw>>1), by, Math.max(1, Math.round(bw*e.hp/e.max)), big ? 2 : 1);
+  }
+  for (const q of BT.shots) lineW(wx(q.x0), wyy(q.y0), wx(q.x1), wyy(q.y1), q.col);
+  for (const q of BT.booms){ g.globalAlpha = Math.min(1, q.life*2); g.fillStyle = q.col; g.fillRect(wx(q.x), wyy(q.y), 2, 2); }
+  g.globalAlpha = 1;
+}
+function drawDef(x,y,t){
+  const px = x*T, py = M + y*T;
+  if (t.k === 'turret'){
+    g.fillStyle = '#7c818c'; g.fillRect(px+3, py+6, 10, 9); g.fillStyle = '#5f6470'; g.fillRect(px+12, py+6, 1, 9);
+    g.fillStyle = '#9aa0ad'; g.fillRect(px+4, py+2, 8, 5);
+    const a = t.aim ?? -Math.PI/4; lineW(px+8, py+4, px + 8 + Math.cos(a)*6, py + 4 + Math.sin(a)*6, '#2f343e');
+    g.fillStyle = '#d2402c'; g.fillRect(px+7, py+3, 2, 1);
+  } else if (t.k === 'aa'){
+    g.fillStyle = '#6d7a5a'; g.fillRect(px+2, py+9, 12, 6); g.fillStyle = '#4a5a3a'; g.fillRect(px+5, py+5, 6, 5);
+    g.fillStyle = '#2f343e'; g.fillRect(px+6, py-3, 1, 8); g.fillRect(px+9, py-3, 1, 8);
+    g.fillStyle = '#7fe8ff'; g.fillRect(px+6, py-4, 1, 1); g.fillRect(px+9, py-4, 1, 1);
+  } else if (t.k === 'radar'){
+    g.fillStyle = '#7c818c'; g.fillRect(px+4, py+13, 8, 2);
+    g.fillStyle = '#8a90a0'; g.fillRect(px+7, py+3, 2, 11);
+    const dx = Math.round(Math.cos(now*2)*6); g.fillStyle = '#c9ccd2'; g.fillRect(px + 8 - Math.abs(dx), py, Math.max(1, Math.abs(dx)*2), 3);
+    g.fillStyle = Math.floor(now*3) % 2 ? '#ff5a4a' : '#7a2a24'; g.fillRect(px+7, py-1, 2, 1);
+  } else if (t.k === 'barracks'){
+    g.fillStyle = '#6b7a4a'; g.fillRect(px+1, py+6, 14, 9);
+    g.fillStyle = '#55633a'; for (let k=0; k<4; k++) g.fillRect(px + 1 + k, py + 6 - k, 14 - k*2, 1);
+    g.fillStyle = '#3a4228'; g.fillRect(px+6, py+10, 4, 5);
+    g.fillStyle = '#d0d0d0'; g.fillRect(px+14, py-4, 1, 10); g.fillStyle = '#4a7ab0'; g.fillRect(px+15, py-4, 3, 2);
+  }
+}
+function drawDefBig(ax,ay,k){
+  const px = ax*T, top = M + ay*T, bot = M + (ay+2)*T - 1;
+  if (k === 'tankyard'){
+    g.fillStyle = '#8c8678'; g.fillRect(px, top, 32, 32);
+    g.fillStyle = '#6b7a4a'; g.fillRect(px+2, bot-20, 28, 18);
+    g.fillStyle = '#55633a'; for (let q=0; q<5; q++) g.fillRect(px + 2 + q*2, bot - 20 - q, 28 - q*4, 1);
+    g.fillStyle = '#3a4228'; g.fillRect(px+8, bot-12, 16, 10);
+    g.fillStyle = '#5a6b3a'; g.fillRect(px+10, bot-6, 7, 4); g.fillRect(px+12, bot-8, 3, 2);
+    g.fillStyle = '#f4b941'; g.fillRect(px+2, bot-1, 28, 1);
+  } else {
+    g.fillStyle = '#6d7076'; g.fillRect(px, top+14, 32, 12);
+    g.fillStyle = '#f4f1ea'; for (let q=0; q<6; q++) g.fillRect(px + 2 + q*5, top+19, 3, 1);
+    g.fillStyle = '#8a90a0'; g.fillRect(px+3, top+2, 14, 10); g.fillStyle = '#6d7385'; g.fillRect(px+3, top+1, 14, 2);
+    g.fillStyle = '#3a3f4a'; g.fillRect(px+6, top+6, 8, 6);
+    g.fillStyle = '#c9ccd2'; g.fillRect(px+22, top+5, 5, 2); g.fillRect(px+24, top+3, 1, 6);
+    if (Math.floor(now*2) % 2){ g.fillStyle = '#ff5a4a'; g.fillRect(px+30, top+14, 1, 1); }
+  }
+}
+function showDefPicker(x,y){
+  let h = '<h3>防衛設施</h3><p class="dimtxt">外來物種會打掉建築的樓層（但不會整棟摧毀）。</p>';
+  DEFS.forEach(D => {
+    const lock = ST.pop < D.pop, fit = !D.big || canBig(x,y);
+    h += `<button class="pick" type="button" data-act="defb" data-k="${D.k}" ${lock || !fit || S.coins < D.cost ? 'disabled' : ''}><span>${D.n}</span><small>${lock ? `人口達 ${D.pop} 解鎖` : !fit ? '需要 2×2 空地（這格往右、往下各一格）' : `${D.cost} 金 · ${D.d}`}</small></button>`;
+  });
+  panel(h);
+}
+
 /* ---------- HUD ---------- */
 function evtLabel(){
   const e = S.evt; if (!e) return '';
@@ -2593,11 +2889,11 @@ addEventListener('keydown', e => {
 });
 
 /* ---------- loop & boot ---------- */
-function resetWorld(){ walkers = []; cars = []; fw = []; ufo = null; camTouched = false; groundKey = ''; roadsCache = null; lastQuestHtml = ''; changed(); fit(); }
+function resetWorld(){ BT = null; walkers = []; cars = []; fw = []; ufo = null; camTouched = false; groundKey = ''; roadsCache = null; lastQuestHtml = ''; changed(); fit(); }
 let last = performance.now(), hudAcc = 0;
 function frame(ts){
   const dt = Math.min(.05, (ts - last)/1000); last = ts; now = ts/1000;
-  tick(dt); updMovers(dt); updStack(dt); updUfo(dt); updFireworks(dt);
+  tick(BT ? dt*.25 : dt); updMovers(dt); updStack(dt); updUfo(dt); updFireworks(dt); updBattle(dt);
   mapShake = Math.max(0, mapShake - dt);
   renderWorld(dt); drawMap(); renderStack();
   hudAcc += dt; if (hudAcc > .2){ hudAcc = 0; hud(); }
