@@ -1494,7 +1494,7 @@ function spawnMover(list, want, mk){
 function updMovers(dt){
   const stay = S.weather === 4 ? .25 : S.weather === 5 ? .6 : 1;
   const wantW = Math.min(40, Math.floor(ST.pop/8*stay) + (S.evt?.k === 'tour' && S.evt.done ? 8 : 0) + (festival() ? 10 : 0));
-  walkers = spawnMover(walkers, wantW, n => ({ c:SHIRTS[n % SHIRTS.length], ox:Math.floor(Math.random()*6), oy:Math.floor(Math.random()*5) }));
+  walkers = spawnMover(walkers, wantW, n => ({ c:SHIRTS[n % SHIRTS.length], ox:Math.floor(Math.random()*8), oy:Math.floor(Math.random()*8), side:Math.random() < .5 }));
   for (const w of walkers) stepMover(w, .8, dt);
   const wantC = S.weather === 4 ? 0 : Math.min(36, Math.floor(ST.pop/25));
   cars = spawnMover(cars, wantC, n => ({ c:CAR_COLS[n % CAR_COLS.length] }));
@@ -1503,7 +1503,8 @@ function updMovers(dt){
 }
 function drawMovers(){
   for (const w of walkers){
-    const px = Math.round(w.fx*T) + 4 + w.ox, py = M + Math.round(w.fy*T) + 4 + w.oy;
+    const horiz = w.dy === 0;
+    const px = Math.round(w.fx*T) + (horiz ? 4 + w.ox : (w.side ? 14 : 0)), py = M + Math.round(w.fy*T) + (horiz ? (w.side ? 12 : -2) : 4 + w.oy);
     g.fillStyle = '#f1c9a0'; g.fillRect(px, py, 2, 1);
     g.fillStyle = w.c; g.fillRect(px, py+1, 2, 2);
     g.fillStyle = '#2a2a38'; g.fillRect(px, py+3, 1, 1); g.fillRect(px+1, py+3, 1, Math.floor(now*6)%2);
