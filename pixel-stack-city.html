@@ -112,6 +112,8 @@ button:disabled{opacity:.45;cursor:not-allowed;filter:none}
 #sres p{margin:0;line-height:1.6}
 #sres .btnrow{justify-content:center}
 #sres .share{font-size:13px;color:var(--dim);user-select:all;background:var(--edge);padding:6px 8px;max-width:100%;overflow-wrap:anywhere}
+#sitems button{padding:4px 10px;font-size:13px}
+#sitems:empty{display:none}
 .shint{margin:0;color:var(--dim);font-size:13px;text-align:center;max-width:320px}
 #rate{position:fixed;inset:0;background:rgba(8,9,18,.82);display:flex;align-items:center;justify-content:center;padding-inline:16px;z-index:11}
 .rbox{background:var(--panel);padding:18px 20px;box-shadow:0 0 0 3px var(--gold),8px 8px 0 rgba(0,0,0,.5);display:flex;flex-direction:column;gap:10px;width:min(420px,100%);max-height:calc(100% - 32px);overflow:auto}
@@ -179,6 +181,7 @@ button:disabled{opacity:.45;cursor:not-allowed;filter:none}
       <div id="sflash"></div>
       <div id="sres" hidden></div>
     </div>
+    <div class="btnrow" id="sitems"></div>
     <div class="btnrow"><button id="sfinish" type="button">完工</button></div>
     <p class="shint" id="shint">點畫面或按空白鍵放下樓層。對齊下面那層就是「完美」。</p>
   </div>
@@ -258,6 +261,16 @@ const FUN = [
   { k:'lotto',  n:'彩券行',     cost:150, pop:20, d:'每張彩券 20 金，每週開獎一次，頭獎很大' },
 ];
 const LOTTO_PRICE = 20, LOTTO_MAX = 10;
+const SITES = [
+  { k:'none',  n:'一般工地', w:28, d:'' },
+  { k:'crane', n:'吊車施工', w:16, d:'樓層掛在吊車上像鐘擺一樣擺盪' },
+  { k:'shift', n:'軟地基',   w:14, d:'整棟樓會左右搖晃，要跟著晃動對準頂樓' },
+  { k:'rush',  n:'趕工',     w:14, d:'越疊越快，但完美獎勵 ×2' },
+  { k:'coins', n:'金幣雨',   w:14, d:'空中有金幣，放下的樓層蓋到就能拿' },
+  { k:'gust',  n:'陣風',     w:14, d:'偶爾突然颳起強風，看到箭頭要小心' },
+];
+const ITEMS = { slow:{ n:'慢動作', d:'接下來 3 層速度減半' }, magnet:{ n:'磁鐵', d:'下一層差一點也會自動對齊' }, widen:{ n:'加寬', d:'頂樓變寬一些' } };
+const ITEM_KEYS = ['slow','magnet','widen'];
 function bspec(t){ const s = STYLES[t.t].find(q => q.id === (t.st || '')) || STYLES[t.t][0]; return { ...TIERS[t.t], ...s, ...(s.pal || {}), name:s.n, st:s.id, rs:s.rs !== undefined ? s.rs : s.id }; }
 const RULES = ['', '周圍 8 格內要有至少 1 棟小房子', '周圍 8 格內要有至少 2 棟公寓'];
 function bldNeighbors(x,y,tier){ let n = 0; for (let dy=-1; dy<=1; dy++) for (let dx=-1; dx<=1; dx++){ if (!dx && !dy) continue; const t = get(x+dx,y+dy); if (t?.k === 'bld' && t.t === tier) n++; } return n; }
@@ -378,7 +391,7 @@ function newCity(stage, theme, name){
   return c;
 }
 function newGlobal(){
-  G = { v:4, cur:0, cities:[], nextId:0, quest:0, ach:{}, st:{}, daily:null, tickets:1, shards:0, skins:{}, fortune:null, mile:0, savedAt:0 };
+  G = { v:4, cur:0, cities:[], nextId:0, quest:0, ach:{}, st:{}, daily:null, tickets:1, shards:0, skins:{}, fortune:null, mile:0, savedAt:0, items:{ slow:1, magnet:1, widen:1 } };
   S = null;
   G.cities.push(newCity(0, 'valley', randomName()));
   return G;
@@ -388,6 +401,7 @@ function loadGlobal(o){
   for (const c of o.cities) if (!Array.isArray(c.grid) || c.grid.length !== c.W*c.H || !Array.isArray(c.terr) || !Array.isArray(c.own)) return null;
   const g0 = Object.assign({ cur:0, quest:0, ach:{}, st:{}, daily:null, tickets:0, shards:0, skins:{}, fortune:null, mile:0, nextId:o.cities.length, savedAt:0 }, o);
   g0.cur = clamp(g0.cur|0, 0, g0.cities.length - 1);
+  g0.items = Object.assign({ slow:1, magnet:1, widen:1 }, g0.items || {});
   for (const c of g0.cities){ c.log = Array.isArray(c.log) ? c.log : []; c.ratings = Array.isArray(c.ratings) ? c.ratings : []; }
   return g0;
 }
@@ -787,6 +801,7 @@ const QUESTS = [
   { ...popQ(50), t:'人口達到 50，解鎖公寓', r:100 },
   { t:'一次疊樓連續 5 次完美', ok:() => (G.st.maxCombo||0) >= 5, p:() => `${G.st.maxCombo||0}/5`, r:100 },
   { t:'完成一次居民請求', ok:() => (G.st.req||0) >= 1, r:80 },
+  { t:'疊樓時完成一次工程委託', ok:() => (G.st.contracts||0) >= 1, r:80 },
   { t:'蓋一座工廠（別太靠近住家）', ok:() => C('factory') >= 1, r:100 },
   { t:'用「防衛」蓋一座防衛塔', ok:() => C('turret') >= 1, r:100 },
   { t:'人口 30 以上，幸福度達到 80%', ok:() => ST.pop >= 30 && ST.happy >= 80, p:() => `${ST.happy}%`, r:150 },
@@ -857,6 +872,7 @@ const ACH = [
   { id:'perfdef',  n:'滴水不漏',   d:'擊退入侵且城市零損失',               ok:() => !!G.st.perfectDef },
   { id:'kaiju',    n:'怪獸剋星',   d:'打倒巨大怪獸',                       ok:() => !!G.st.kaiju },
   { id:'ally',     n:'同盟',       d:'請其他城市派兵支援',                 ok:() => !!G.st.ally },
+  { id:'contract', n:'包工頭',     d:'完成 10 次工程委託',                 ok:() => (G.st.contracts||0) >= 10 },
   { id:'city3',   n:'開拓者',     d:'經營三座城市',                       ok:() => G.cities.length >= 3 },
   { id:'city6',   n:'城市聯盟',   d:'經營六座城市',                       ok:() => G.cities.length >= 6 },
   { id:'tp5000',  n:'傳奇市長',   d:'總人口達到 5000',                    ok:() => totalPop() >= 5000 },
@@ -1993,6 +2009,25 @@ function showBigPicker(x,y){
   });
   panel(h);
 }
+function autoFloors(spec, existing){ return existing ? Math.min(spec.max - existing.f, Math.max(1, Math.ceil(spec.max*.4))) : Math.max(1, Math.ceil(spec.max*.6)); }
+function showBuildMode(x, y, ti, st, cost, existing){
+  const spec = bspec({ t:ti, st }), n = autoFloors(spec, existing);
+  sel = { x, y, pending:{ ti, st, cost, existing:!!existing } };
+  panel(`<h3>${spec.name}${existing ? ' · 加蓋' : ''}</h3><p>要怎麼蓋？</p>
+    <button class="pick" type="button" data-act="stackgo" ${S.coins < cost ? 'disabled' : ''}><span>親自疊樓（${cost} 金）</span><small>玩疊樓，有完美獎勵、工地狀況和工程委託</small></button>
+    <button class="pick" type="button" data-act="autogo" ${S.coins < cost*2 || n < 1 ? 'disabled' : ''}><span>快速施工（${cost*2} 金）</span><small>直接${existing ? '加蓋' : '蓋好'} ${n} 層，精準度 70%，沒有完美獎勵</small></button>`);
+}
+function autoBuild(x, y, ti, st, existing){
+  const spec = bspec({ t:ti, st }), n = autoFloors(spec, existing);
+  const t = existing || { k:'bld', t:ti, f:0, w:[], o:[], s:'', st:st || undefined };
+  for (let k=0; k<n; k++){ t.w.push(.7); t.o.push(.15); }
+  t.f += n; t.s = (t.s || '').padEnd(t.f, 'n');
+  t.p = Math.round(t.w.reduce((a,b) => a + b, 0)/t.f*100)/100;
+  S.grid[idx(x,y)] = t; G.st.autos = (G.st.autos || 0) + 1;
+  changed(); scheduleSave(); beep(520,.1,'triangle');
+  toast(`快速施工完成：${spec.name} ${existing ? '加蓋' : '蓋好'} ${n} 層`);
+  sel = { x, y }; showInfo(x, y);
+}
 function showDemolish(x,y){
   let t = get(x,y); if (t.k === 'big'){ x = t.ax; y = t.ay; }
   const nm = t.k === 'lm' ? LANDMARKS[t.id].name : t.k === 'big' ? NAMES[t.bk] : t.k === 'pagoda' ? '五重塔' : bspec(t).name;
@@ -2227,8 +2262,7 @@ info.addEventListener('click', e => {
     const ti = +b.dataset.tier, st = b.dataset.st || '', sp = bspec({ t:ti, st }), cost = Math.round(sp.cost*hillMul(x,y));
     if (t || ti > S.unlock) return;
     if (!ruleOk(ti,x,y)) return toast(`不能蓋：${RULES[ti]}`);
-    if (S.coins < cost) return toast('金幣不足');
-    S.coins -= cost; hidePanel(); startStack(x, y, ti, null, cost, null, st);
+    return showBuildMode(x, y, ti, st, cost, null);
   } else if (a === 'jpb'){
     const J = JP.find(q => q.k === b.dataset.k);
     if (t || ST.pop < J.pop || (J.unique && C(J.k) >= 1) || (J.big && !canBig(x,y))) return;
@@ -2299,9 +2333,16 @@ info.addEventListener('click', e => {
     S.coins -= price; S.own[pidx(px,py)] = 1; S.bought = (S.bought || 0) + 1;
     hidePanel(); changed(); toast('買下新土地了！'); addLog('買下一塊新土地'); beep(660,.12,'triangle');
   } else if (a === 'add' && t?.k === 'bld'){
-    const c = Math.ceil(bspec(t).cost/2);
-    if (S.coins < c) return toast('金幣不足');
-    S.coins -= c; hidePanel(); startStack(x, y, t.t, t, c, null, t.st || '');
+    return showBuildMode(x, y, t.t, t.st || '', Math.ceil(bspec(t).cost/2), t);
+  } else if (a === 'stackgo' || a === 'autogo'){
+    const P = sel.pending; if (!P) return;
+    const cur = get(x,y);
+    if (P.existing ? cur?.k !== 'bld' : cur) return;
+    const cost = a === 'autogo' ? P.cost*2 : P.cost;
+    if (S.coins < cost) return toast('金幣不足');
+    S.coins -= cost; hidePanel();
+    if (a === 'stackgo') startStack(x, y, P.ti, P.existing ? cur : null, cost, null, P.st);
+    else autoBuild(x, y, P.ti, P.st, P.existing ? cur : null);
   } else if (a === 'demolish' && t){
     if (t.k === 'big'){ for (let dy=0; dy<2; dy++) for (let dx=0; dx<2; dx++) S.grid[idx(t.ax+dx,t.ay+dy)] = null; }
     else if (t.k === 'bld' || t.k === 'lm' || t.k === 'pagoda') S.grid[idx(x,y)] = null;
@@ -2324,19 +2365,61 @@ function startStack(x, y, ti, existing, paid, ch, st){
   SM.spec = bspec({ t:ti, st:SM.st });
   SM.max = ch ? 99 : SM.spec.max;
   SM.camY = camTarget();
+  let rr = Math.random()*SITES.reduce((a,q) => a + q.w, 0); SM.site = SITES[0];
+  if (!ch) for (const q of SITES){ if ((rr -= q.w) < 0){ SM.site = q; break; } }
+  SM.sh = 0; SM.slowN = 0; SM.magnet = false; SM.coinX = null; SM.coinsGot = 0; SM.gust = { t:3 + Math.random()*3, warn:0, on:0, dir:1 };
+  SM.goal = ch ? null : pickGoal(); SM.goalShown = false;
   $('#sres').hidden = true; $('#sfinish').hidden = false; $('#sfinish').textContent = ch ? '結束挑戰' : '完工'; $('#stack').hidden = false;
   const E = env();
-  $('#shint').textContent = WEATHER[E.weather].snow ? '下雪天：放下樓層後會往前滑一點，要提早按。' : '點畫面或按空白鍵放下樓層。對齊下面那層就是「完美」。';
-  spawn(); updHead(); beep(440,.06);
+  $('#shint').textContent = (SM.site.d ? `${SM.site.n}：${SM.site.d}。` : '') + (WEATHER[E.weather].snow ? '下雪天：放下樓層後會往前滑一點，要提早按。' : '點畫面或按空白鍵放下樓層，按 1、2、3 使用道具。');
+  spawn(); updHead(); renderItems(); beep(440,.06);
+  if (SM.site.k !== 'none') setTimeout(() => flash(SM.site.n), 200);
 }
 const topF = () => SM.floors.length ? SM.floors[SM.floors.length-1] : { l:BASEL, w:BASEW };
+function pickGoal(){
+  const room = SM.max - SM.start; if (room < 2) return null;
+  const fl = Math.min(room, 3 + SM.t*3);
+  const opts = [ { k:'combo', need:4, n:'連續完美 4 次' }, { k:'floors', need:fl, n:`這次蓋 ${fl} 層以上` }, { k:'prec', need:90, n:'新樓層平均精準度 90%（至少 3 層）' } ];
+  if (SM.site.k === 'coins') opts.push({ k:'coin', need:2, n:'收集 2 枚金幣' });
+  const g0 = { ...opts[Math.floor(Math.random()*opts.length)] };
+  g0.reward = 30*(SM.t + 1) + (SM.site.k !== 'none' ? 20 : 0);
+  return g0;
+}
+function goalProg(){
+  const g0 = SM.goal; if (!g0) return [0,1];
+  const nf = SM.floors.slice(SM.start);
+  if (g0.k === 'combo') return [SM.maxCombo, g0.need];
+  if (g0.k === 'floors') return [nf.length, g0.need];
+  if (g0.k === 'coin') return [SM.coinsGot, g0.need];
+  return [nf.length >= 3 ? Math.round(nf.reduce((a,f) => a + f.w, 0)/nf.length/BASEW*100) : 0, 90];
+}
+const goalDone = () => { if (!SM.goal) return false; const [a,b] = goalProg(); return a >= b; };
+function renderItems(){
+  const el = $('#sitems');
+  if (!SM || SM.ch || SM.over){ el.innerHTML = ''; return; }
+  el.innerHTML = ITEM_KEYS.map((k,i) => `<button type="button" data-item="${k}" title="${ITEMS[k].d}" ${G.items[k] ? '' : 'disabled'}>${i+1} ${ITEMS[k].n} ×${G.items[k] || 0}</button>`).join('');
+}
+function useItem(k){
+  if (!SM || SM.ch || SM.over || !SM.cur || !G.items[k]) return;
+  if (k === 'slow') SM.slowN += 3;
+  else if (k === 'magnet') SM.magnet = true;
+  else {
+    const f = SM.floors[SM.floors.length - 1];
+    if (!f || f.w >= BASEW) return toast('頂樓已經是最寬了');
+    const gw = Math.min(12, BASEW - f.w); f.w += gw; f.l -= gw/2; SM.cur.w = f.w; SM.cur.l = clamp(SM.cur.l, 0, SW - SM.cur.w);
+  }
+  G.items[k]--; markDirty(); flash(`${ITEMS[k].n}！`); beep(988,.12,'sine',.04); renderItems(); updHead();
+}
+$('#sitems').addEventListener('click', e => { const b = e.target.closest('[data-item]'); if (b) useItem(b.dataset.item); });
 function camTarget(){ const bh = TIERS[SM.t].bh; return Math.max(0, (SM.floors.length + 3)*bh - (GROUND - 30)); }
 function spawn(){
   const t = topF(), n = SM.floors.length, tier = TIERS[SM.t], r = Math.random(), gm = (S.level || 0) >= 3 ? 2 : 1;
   const gc = .07*gm*(SM.ch ? 1 : (fortune()?.gold || 1));
   const kind = n < 2 ? 'n' : r < gc ? 'g' : r < gc + .1 ? 'h' : 'n';
-  const sp = Math.min(185, (tier.speed + n*3.2)*(SM.ch ? SM.ch.sp : 1)*(kind === 'h' ? 1.3 : 1)), left = n % 2 === 0;
-  SM.cur = { l: left ? 0 : SW - t.w, w: t.w, v: left ? sp : -sp, kind };
+  const rush = SM.site.k === 'rush' ? 1 + (n - SM.start)*.05 : 1;
+  const sp = Math.min(SM.site.k === 'rush' ? 230 : 185, (tier.speed + n*3.2)*(SM.ch ? SM.ch.sp : 1)*(kind === 'h' ? 1.3 : 1)*rush), left = n % 2 === 0;
+  SM.cur = { l: left ? 0 : SW - t.w, w: t.w, v: left ? sp : -sp, kind, th: left ? -Math.PI/2 : Math.PI/2, om:(1.5 + (n - SM.start)*.06)*(SM.ch ? SM.ch.sp : 1)*(kind === 'h' ? 1.3 : 1) };
+  SM.coinX = SM.site.k === 'coins' && Math.random() < .5 ? 10 + Math.random()*(SW - 20) : null;
 }
 const score = () => SM.floors.length - SM.start + SM.perfects + SM.golds*3;
 function updHead(){
@@ -2344,7 +2427,10 @@ function updHead(){
   const wind = E.wind ? `${E.windDir > 0 ? '→' : '←'} ${E.wind >= .7 ? '狂' : E.wind >= .4 ? '強' : '弱'}` : '無';
   const k = SM.cur?.kind === 'g' ? '<span style="color:var(--gold)">金色樓層！</span>' : SM.cur?.kind === 'h' ? '<span style="color:var(--bad)">重樓層</span>' : '';
   $('#shead').innerHTML = (SM.ch ? `<span><span class="k">每日挑戰</span> ${SM.ch.n}</span><span><span class="k">分數</span> <b>${score()}</b></span>` : `<span><span class="k">${tier.name}</span> <b>${n}</b> / ${tier.max} 層</span>`) +
-    `<span><span class="k">連擊</span> ${SM.combo}</span><span><span class="k">風</span> ${wind}</span><span><span class="k">天氣</span> ${WEATHER[E.weather].n}</span>${k}`;
+    `<span><span class="k">連擊</span> ${SM.combo}</span><span><span class="k">風</span> ${wind}</span><span><span class="k">天氣</span> ${WEATHER[E.weather].n}</span>${k}`
+    + (SM.site.k !== 'none' ? `<span><span class="k">工地</span> ${SM.site.n}</span>` : '')
+    + (SM.goal ? (() => { const [a,b] = goalProg(); return `<span><span class="k">委託</span> ${SM.goal.n}（${Math.min(a,b)}/${b}）${a >= b ? ' ✔' : ''}</span>`; })() : '')
+    + (SM.slowN ? `<span style="color:var(--sky)">慢動作 ${SM.slowN}</span>` : '') + (SM.magnet ? '<span style="color:var(--sky)">磁鐵</span>' : '');
 }
 function flash(msg){ const f = $('#sflash'); f.textContent = msg; f.classList.add('show'); requestAnimationFrame(() => requestAnimationFrame(() => f.classList.remove('show'))); }
 function burst(x, y, n, rainbow){
@@ -2355,14 +2441,18 @@ function burst(x, y, n, rainbow){
 }
 function drop(){
   if (!SM || SM.over || !SM.cur) return;
-  const E = env(), c = SM.cur, t = topF(), tier = TIERS[SM.t], bh = tier.bh, yy = GROUND - (SM.floors.length+1)*bh;
+  const E = env(), c = SM.cur, t0 = topF(), sh = SM.site.k === 'shift' ? SM.sh : 0, t = { l:t0.l + sh, w:t0.w }, tier = TIERS[SM.t], bh = tier.bh, yy = GROUND - (SM.floors.length+1)*bh;
   if (WEATHER[E.weather].snow) c.l = clamp(c.l + c.v*.045, 0, SW - c.w);
   let tol = WEATHER[E.weather].rain ? 1.2 : 2.5; if (c.kind === 'h') tol *= .5;
   const F = SM.ch ? null : fortune(); if (F) tol *= F.tol;
+  if (SM.magnet){ tol = Math.max(tol, 10); SM.magnet = false; }
+  if (SM.slowN > 0) SM.slowN--;
+  const coinHit = (l, w) => { if (SM.coinX === null || SM.coinX < l || SM.coinX > l + w) return; SM.coinsGot++; const v = 10*(SM.t + 1); S.coins += v; SM.earned += v; SM.coinX = null; beep(1568,.12,'square',.03); burst(l + w/2, yy, 10, false); };
   if (Math.abs(c.l - t.l) <= tol){
     SM.combo++; SM.perfects++; SM.maxCombo = Math.max(SM.maxCombo, SM.combo); SM.lastPerfect = true;
     let w = t.w, l = t.l, msg = SM.combo > 1 ? `完美 ×${SM.combo}` : '完美！';
-    if (!SM.ch){ S.coins += 2; SM.earned += 2; }
+    if (!SM.ch){ const pc = SM.site.k === 'rush' ? 4 : 2; S.coins += pc; SM.earned += pc; }
+    if (!SM.ch && SM.combo % 5 === 0){ const ik = ITEM_KEYS[Math.floor(Math.random()*3)]; G.items[ik] = (G.items[ik] || 0) + 1; setTimeout(() => { flash(`獲得道具：${ITEMS[ik].n}`); renderItems(); }, 500); }
     if (SM.combo >= 3 && w < BASEW){ const gw = Math.min(4, BASEW - w); w += gw; l -= gw/2; msg = `完美 ×${SM.combo}！樓層變寬`; }
     if (c.kind === 'g'){
       SM.golds++; G.st.gold = 1;
@@ -2371,7 +2461,7 @@ function drop(){
     }
     if (SM.combo >= 8) msg = `超級連擊 ×${SM.combo}！`;
     flash(msg);
-    SM.floors.push({ l, w, s:c.kind }); beep(520 + Math.min(SM.combo,12)*60, .1, 'triangle');
+    SM.floors.push({ l:l - sh, w, s:c.kind }); coinHit(l, w); beep(520 + Math.min(SM.combo,12)*60, .1, 'triangle');
     burst(l + w/2, yy, Math.min(40, 6 + SM.combo*3 + (c.kind === 'g' ? 12 : 0)), SM.combo >= 5);
   } else {
     SM.combo = 0; SM.lastPerfect = false;
@@ -2383,7 +2473,7 @@ function drop(){
     }
     if (c.l < L) SM.debris.push({ l:c.l, w:L - c.l, y:yy, vy:0, s:c.kind });
     if (c.l + c.w > R) SM.debris.push({ l:R, w:c.l + c.w - R, y:yy, vy:0, s:c.kind });
-    SM.floors.push({ l:L, w:ow, s:c.kind }); beep(300,.06);
+    SM.floors.push({ l:L - sh, w:ow, s:c.kind }); coinHit(L, ow); beep(300,.06);
   }
   SM.cur = null;
   if (SM.bet){
@@ -2428,6 +2518,11 @@ function endStack(reason){
       const head = reason === 'collapse' ? '樓層掉下去了！' : reason === 'max' ? '蓋到頂了！' : '完工！';
       const hv = (ss.match(/h/g) || []).length;
       msg = `<h3>${head}</h3><p>${tier.name}現在有 <b>${n}</b> 層（這次 +${added}）</p><p>可住 ${(n + hv)*tier.pop} 人 · 精準度 ${Math.round(p*100)}%</p>${SM.earned ? `<p>完美獎勵 +${SM.earned} 金</p>` : ''}${p < .65 ? '<p class="no">精準度偏低，地震時容易倒樓。</p>' : ''}${roadAdj(SM.x,SM.y) ? '' : '<p class="no">記得幫它接上道路，居民才會搬進來。</p>'}`;
+      if (SM.goal && !SM.goalShown){
+        SM.goalShown = true;
+        if (goalDone()){ S.coins += SM.goal.reward; G.st.contracts = (G.st.contracts || 0) + 1; msg += `<p class="ok">委託完成：${SM.goal.n}，+${SM.goal.reward} 金</p>`; }
+        else { const [a,b] = goalProg(); msg += `<p class="dimtxt">委託未完成：${SM.goal.n}（${Math.min(a,b)}/${b}）</p>`; }
+      }
       if (SM.bet){
         if (SM.bet.pen !== undefined) msg += `<p class="no">加碼失敗：倒塌了，扣回一半完美獎勵 −${SM.bet.pen} 金</p>`;
         else if (SM.bet.win) msg += `<p class="ok">加碼成功！3 層全部完美，獎勵 +${SM.bet.win} 金</p>`;
@@ -2444,7 +2539,7 @@ function endStack(reason){
     changed(); saveNow();
     r.innerHTML = msg + '<div class="btnrow"><button type="button" data-act="back">回到城市</button></div>';
   }
-  r.hidden = false; $('#sfinish').hidden = true;
+  r.hidden = false; $('#sfinish').hidden = true; renderItems();
   setTimeout(() => r.querySelector('[data-act="back"]')?.focus(), 50);
 }
 function closeStack(){
@@ -2457,7 +2552,7 @@ $('#sres').addEventListener('click', e => {
   const a = b.dataset.act;
   if (a === 'back') closeStack();
   else if (a === 'bet' && !SM.bet && !SM.ch){
-    SM.bet = { done:0, miss:false, base:SM.earned }; SM.over = false;
+    SM.bet = { done:0, miss:false, base:SM.earned }; SM.over = false; setTimeout(renderItems, 0);
     $('#sres').hidden = true; $('#sfinish').hidden = false; $('#sfinish').textContent = '放棄加碼';
     G.st.bets = (G.st.bets || 0) + 1; spawn(); updHead(); beep(523,.1,'square',.03);
   }
@@ -2498,12 +2593,25 @@ function sBlock(l, y, w, h, tier, i, lit, kind){
 function updStack(dt){
   if (!SM) return;
   const c = SM.cur, E = env();
+  const slow = SM.slowN > 0 ? .5 : 1;
   if (c){
-    const mult = 1 + E.wind*E.windDir*Math.sign(c.v);
-    c.l += c.v*mult*dt;
-    if (c.l < 0){ c.l = 0; c.v = Math.abs(c.v); }
-    if (c.l > SW - c.w){ c.l = SW - c.w; c.v = -Math.abs(c.v); }
+    if (SM.site.k === 'crane'){
+      const A = (SW - c.w)/2; c.th += c.om*slow*dt;
+      c.l = clamp(A + Math.sin(c.th)*A + E.wind*E.windDir*12, 0, SW - c.w); c.v = Math.cos(c.th)*A*c.om*slow;
+    } else {
+      const mult = 1 + E.wind*E.windDir*Math.sign(c.v);
+      c.l += c.v*mult*slow*dt;
+      if (c.l < 0){ c.l = 0; c.v = Math.abs(c.v); }
+      if (c.l > SW - c.w){ c.l = SW - c.w; c.v = -Math.abs(c.v); }
+    }
+    if (SM.site.k === 'gust' && !SM.over){
+      const gu = SM.gust;
+      if (gu.on > 0){ gu.on -= dt; c.l = clamp(c.l + gu.dir*75*dt, 0, SW - c.w); }
+      else if (gu.warn > 0){ gu.warn -= dt; if (gu.warn <= 0) gu.on = 1; }
+      else if ((gu.t -= dt) <= 0){ gu.t = 3 + Math.random()*4; gu.warn = .9; gu.dir = Math.random() < .5 ? -1 : 1; }
+    }
   }
+  if (SM.site.k === 'shift') SM.sh = Math.sin(now*1.3)*Math.min(12, 2 + SM.floors.length*.6);
   for (const d of SM.debris){ d.vy += 500*dt; d.y += d.vy*dt; }
   SM.debris = SM.debris.filter(d => d.y < GROUND + 200);
   for (const p of SM.parts){ p.x += p.vx*dt; p.y += p.vy*dt; p.vy += 160*dt; p.life -= dt; }
@@ -2538,12 +2646,17 @@ function renderStack(){
   c.fillStyle = sea.dots[2]; c.fillRect(-4, GROUND + cy, SW+8, 2);
   c.fillStyle = '#7a776f'; c.fillRect(BASEL - 3, GROUND + cy, BASEW + 6, 4);
   const lit = d > .25;
-  SM.floors.forEach((f,i) => sBlock(f.l, GROUND - (i+1)*bh + cy, f.w, bh, tier, i, lit, f.s));
+  const shN = Math.max(1, SM.floors.length), sh = SM.site.k === 'shift' ? SM.sh : 0;
+  SM.floors.forEach((f,i) => sBlock(f.l + sh*(i+1)/shN, GROUND - (i+1)*bh + cy, f.w, bh, tier, i, lit, f.s));
   if (SM.cur){
-    const t = topF(), yy = GROUND - (SM.floors.length+1)*bh + cy;
+    const t0 = topF(), t = { l:t0.l + sh, w:t0.w }, yy = GROUND - (SM.floors.length+1)*bh + cy;
+    if (SM.site.k === 'crane'){ const rx = Math.round(SM.cur.l + SM.cur.w/2); c.fillStyle = '#e8b23a'; c.fillRect(-4, 6, SW + 8, 3); c.fillStyle = '#7a776f'; c.fillRect(rx, 9, 1, Math.max(0, yy - 11)); c.fillStyle = '#3a3f4a'; c.fillRect(rx - 2, yy - 3, 5, 3); }
+    if (SM.coinX !== null){ const cw = Math.max(1, Math.round(Math.abs(Math.sin(now*5))*5)); c.fillStyle = '#f4b941'; c.fillRect(Math.round(SM.coinX - cw/2), yy + (bh>>1) - 3, cw, 6); c.fillStyle = '#fff3b0'; c.fillRect(Math.round(SM.coinX - cw/2), yy + (bh>>1) - 3, Math.max(1, cw - 2), 1); }
     c.fillStyle = 'rgba(255,255,255,.18)';
     c.fillRect(Math.round(t.l), yy - 30, 1, 30 + bh); c.fillRect(Math.round(t.l + t.w) - 1, yy - 30, 1, 30 + bh);
     sBlock(SM.cur.l, yy, SM.cur.w, bh, tier, SM.floors.length, lit, SM.cur.kind);
+    if (SM.magnet){ c.fillStyle = 'rgba(80,230,255,.5)'; c.fillRect(Math.round(t.l) - 1, yy + bh, Math.round(t.w) + 2, 1); }
+    const gu = SM.gust; if (SM.site.k === 'gust' && (gu.warn > 0 || gu.on > 0)){ const ax = SW/2, ay = 30; c.fillStyle = gu.on > 0 ? '#ee6a5f' : (Math.floor(now*8) % 2 ? '#f4b941' : 'rgba(244,185,65,.4)'); c.fillRect(ax - 14, ay - 1, 28, 3); for (let k=0; k<5; k++) c.fillRect(ax + gu.dir*(14 - k), ay - k + 1, 1, k*2 + 1); }
   }
   for (const db of SM.debris) sBlock(db.l, db.y + cy, db.w, bh, tier, 0, false, db.s);
   for (const p of SM.parts){ c.globalAlpha = Math.min(1, p.life*1.5); c.fillStyle = p.col; c.fillRect(Math.round(p.x), Math.round(p.y + cy), 2, 2); }
@@ -2864,6 +2977,7 @@ addEventListener('keydown', e => {
   if (e.target.matches && e.target.matches('input, textarea')){ if (e.key === 'Escape') e.target.blur(); return; }
   if (SM){
     if (!SM.over && (e.code === 'Space' || e.code === 'Enter')){ e.preventDefault(); drop(); }
+    else if (!SM.over && ['1','2','3'].includes(e.key)){ useItem(ITEM_KEYS[+e.key - 1]); }
     else if (e.key === 'Escape'){ SM.over ? closeStack() : endStack('finish'); }
     return;
   }
